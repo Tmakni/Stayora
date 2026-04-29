@@ -1,0 +1,10 @@
+#!/bin/bash
+DB_PATH="$HOME/.local/share/airbnb-ai-agent/airbnb_ai_agent.db"
+echo "=== CONVERSATIONS ==="
+sqlite3 "$DB_PATH" ".mode column" ".headers on" "SELECT id, title, airbnb_thread_id, external_id, external_provider, guest_name FROM conversations LIMIT 10;"
+echo ""
+echo "=== AIRBNB ACCOUNTS ==="
+sqlite3 "$DB_PATH" ".mode column" ".headers on" "SELECT id, airbnb_email, display_name, is_active, airbnb_user_id FROM airbnb_accounts LIMIT 5;"
+echo ""
+echo "=== AIRBNB THREADS ==="
+sqlite3 "$DB_PATH" ".mode column" ".headers on" "SELECT id, airbnb_thread_id, conversation_id, guest_name, airbnb_account_id FROM airbnb_threads LIMIT 10;" 2>/dev/null || echo "(table does not exist)"

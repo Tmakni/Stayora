@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="fr">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendrier - HostAI</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <style>
+    header { display: flex !important; height: 56px; background: var(--sidebar-bg); border-bottom: 1px solid rgba(255,255,255,.06); position: sticky; top: 0; z-index: 500; }
+    header .container { max-width: 100%; }
+    .logo { color: #fff !important; font-size: 1rem; }
+    .user-chip { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1); color: var(--sidebar-text); }
+    .header-nav .btn-outline { color: var(--sidebar-text); border-color: rgba(255,255,255,.12); }
+    .header-nav .btn-outline:hover { color: #fff; background: rgba(255,255,255,.08); }
+
+    /* Property selector */
+    .property-selector { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .property-selector select { padding: 8px 12px; border-radius: var(--radius-md); border: 1px solid var(--clr-border); background: var(--clr-bg); color: var(--clr-text); font-size: .9rem; min-width: 250px; }
+
+    /* iCal connection card */
+    .ical-card { padding: 16px; margin-bottom: 20px; }
+    .ical-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .ical-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .ical-dot.connected { background: #22C55E; }
+    .ical-dot.disconnected { background: #EF4444; }
+    .ical-dot.syncing { background: #F59E0B; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .ical-info { flex: 1; }
+    .ical-info .ical-label { font-weight: 600; font-size: .9rem; }
+    .ical-info .ical-detail { font-size: .78rem; color: var(--clr-text-muted); margin-top: 2px; }
+    .ical-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ical-form { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .ical-form input[type="url"] { flex: 1; min-width: 300px; padding: 8px 12px; border-radius: var(--radius-md); border: 1px solid var(--clr-border); background: var(--clr-bg); color: var(--clr-text); font-size: .85rem; }
+    .ical-help { font-size: .75rem; color: var(--clr-text-muted); margin-top: 8px; line-height: 1.5; }
+
+    /* Calendar grid */
+    .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .cal-nav h2 { font-size: 1.1rem; margin: 0; text-transform: capitalize; }
+    .cal-nav button { background: none; border: 1px solid var(--clr-border); border-radius: var(--radius-sm); padding: 6px 14px; cursor: pointer; color: var(--clr-text); font-size: .85rem; }
+    .cal-nav button:hover { background: var(--clr-bg-alt); }
+
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-header { padding: 8px 4px; text-align: center; font-weight: 600; font-size: .78rem; color: var(--clr-text-muted); text-transform: uppercase; }
+    .cal-day { min-height: 80px; padding: 6px; border: 1px solid var(--clr-border); border-radius: var(--radius-sm); background: var(--clr-bg); position: relative; cursor: pointer; transition: background .15s; }
+    .cal-day:hover { background: var(--clr-bg-alt); }
+    .cal-day.other-month { opacity: .35; }
+    .cal-day.today { border-color: var(--clr-primary); border-width: 2px; }
+    .cal-day .day-num { font-size: .82rem; font-weight: 600; margin-bottom: 4px; }
+
+    .cal-event { font-size: .7rem; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cal-event.reservation { background: #FF5A5F22; color: #FF5A5F; border-left: 3px solid #FF5A5F; }
+    .cal-event.blocked { background: #6B728022; color: #6B7280; border-left: 3px solid #6B7280; }
+    .cal-event.reserved { background: #3B82F622; color: #3B82F6; border-left: 3px solid #3B82F6; }
+    .cal-event.maintenance { background: #F59E0B22; color: #B06000; border-left: 3px solid #F59E0B; }
+
+    /* Block form modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: var(--clr-bg); border-radius: var(--radius-lg); padding: 24px; width: 90%; max-width: 420px; box-shadow: var(--shadow-lg); }
+    .modal h3 { margin: 0 0 16px; font-size: 1.05rem; }
+    .modal .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* Legend */
+    .cal-legend { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
+    .cal-legend-item { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--clr-text-muted); }
+    .cal-legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    @media (max-width: 900px) {
+      #calendar-main { padding: 14px 6px 80px !important; }
+      .ical-form input[type="url"] { min-width: 100%; }
+      .property-selector { flex-direction: column; gap: 8px; }
+      .property-selector select { min-width: 100%; font-size: .82rem; }
+
+      /* Force calendar grid to fit screen */
+      .cal-card { padding: 6px !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .cal-grid { gap: 1px; min-width: 300px; }
+      .cal-header { font-size: .55rem; padding: 4px 1px; letter-spacing: 0; }
+      .cal-day { min-height: 42px; padding: 2px; border-radius: 2px; }
+      .cal-day .day-num { font-size: .65rem; margin-bottom: 1px; }
+      .cal-event { font-size: .45rem; padding: 1px 2px; border-left-width: 2px; margin-bottom: 1px; line-height: 1.2; }
+      .cal-nav { margin-bottom: 10px; gap: 4px; }
+      .cal-nav h2 { font-size: .85rem; }
+      .cal-nav button { padding: 6px 8px; font-size: .72rem; }
+      .cal-legend { gap: 8px; margin-top: 8px; }
+      .cal-legend-item { font-size: .65rem; }
+      .cal-legend-dot { width: 8px; height: 8px; }
+      .ical-card { padding: 10px; }
+      .ical-status { gap: 8px; }
+      .ical-info .ical-label { font-size: .8rem; }
+      .ical-info .ical-detail { font-size: .7rem; }
+      h1 { font-size: 1.1rem !important; }
+    }
+    @media (max-width: 400px) {
+      #calendar-main { padding: 10px 4px 76px !important; }
+      .cal-card { padding: 3px !important; }
+      .cal-grid { gap: 0; min-width: 280px; }
+      .cal-day { min-height: 36px; padding: 1px; border-width: 0.5px; }
+      .cal-day .day-num { font-size: .58rem; }
+      .cal-event { font-size: .4rem; padding: 0 1px; border-left-width: 1.5px; }
+      .cal-header { font-size: .48rem; padding: 3px 0; }
+      .cal-nav button { padding: 4px 6px; font-size: .65rem; }
+      .cal-nav h2 { font-size: .78rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- LAYOUT -->
+<div class="dashboard-layout">
+
+  <!-- Mobile top bar -->
+  <div class="mobile-topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="mobile-topbar-title">HostAI</span>
+  </div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      </div>
+      <span class="sidebar-brand-name">HostAI</span>
+      <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
+    </div>
+
+    <span class="sidebar-section-label">Navigation</span>
+    <a class="nav-item" href="/index.html" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="home"></i></span> Propriétés
+    </a>
+    <a class="nav-item" href="/index.html#conversations" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="message-square"></i></span> Conversations
+    </a>
+    <a class="nav-item" href="/index.html#integrations" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="link"></i></span> Intégrations
+    </a>
+    <a class="nav-item active" href="/calendar.html" style="text-decoration:none;" aria-current="page">
+      <span class="nav-icon"><i data-lucide="calendar"></i></span> Calendrier
+    </a>
+
+    <div class="sidebar-spacer"></div>
+
+    <span class="sidebar-section-label">Compte</span>
+    <a class="nav-item" href="/index.html#settings" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="settings"></i></span> Paramètres
+    </a>
+
+    <div class="sidebar-user">
+      <div class="sidebar-user-avatar" id="sidebar-avatar">H</div>
+      <div class="sidebar-user-info">
+        <span class="sidebar-user-email" id="user-email"></span>
+      </div>
+      <button class="btn btn-ghost btn-icon sidebar-logout-btn" onclick="logout()" aria-label="Se déconnecter" title="Déconnexion">
+        <i data-lucide="log-out"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="dashboard-main" id="calendar-main" style="padding:28px 32px 40px;">
+
+  <h1 style="font-size:1.3rem;margin-bottom:20px;">Calendrier des logements</h1>
+
+  <!-- Property selector -->
+  <div class="property-selector">
+    <label for="property-select" style="font-weight:600;font-size:.9rem;">Logement :</label>
+    <select id="property-select"><option value="">Chargement...</option></select>
+    <button class="btn btn-primary btn-sm" id="add-block-btn">+ Bloquer des dates</button>
+  </div>
+
+  <!-- iCal connection card -->
+  <div class="card ical-card" id="ical-section">
+    <div class="ical-status">
+      <div class="ical-dot disconnected" id="ical-dot"></div>
+      <div class="ical-info">
+        <div class="ical-label" id="ical-label">Calendrier iCal non connecté</div>
+        <div class="ical-detail" id="ical-detail">Ajoutez le lien iCal de votre logement Airbnb pour synchroniser automatiquement les disponibilités.</div>
+      </div>
+      <div class="ical-actions" id="ical-actions">
+        <button class="btn btn-primary btn-sm" id="ical-connect-btn">Connecter un calendrier</button>
+      </div>
+    </div>
+    <!-- Connection form (hidden by default) -->
+    <div class="ical-form" id="ical-form" style="display:none;">
+      <input type="url" id="ical-url" placeholder="https://www.airbnb.fr/calendar/ical/XXXXX.ics?s=..." autocomplete="off">
+      <button class="btn btn-primary btn-sm" id="ical-save-btn">Connecter</button>
+      <button class="btn btn-outline btn-sm" id="ical-cancel-btn">Annuler</button>
+    </div>
+    <div class="ical-help" id="ical-help" style="display:none;">
+      <strong>Où trouver le lien iCal ?</strong><br>
+      Airbnb &rarr; Votre annonce &rarr; Calendrier &rarr; Disponibilité &rarr; Exporter le calendrier &rarr; Copier le lien iCal (.ics)<br>
+      Le calendrier se synchronisera automatiquement toutes les 30 minutes.
+    </div>
+  </div>
+
+  <!-- Calendar grid -->
+  <div class="card cal-card" style="padding:16px;overflow-x:auto;">
+    <div class="cal-nav">
+      <button id="prev-month">&larr; Mois précédent</button>
+      <h2 id="cal-month-label"></h2>
+      <button id="next-month">Mois suivant &rarr;</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+    <div class="cal-legend">
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#FF5A5F;"></div> Réservation</div>
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#3B82F6;"></div> iCal (réservé)</div>
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#6B7280;"></div> Bloqué</div>
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#F59E0B;"></div> Maintenance</div>
+    </div>
+  </div>
+
+  </main>
+</div>
+
+<!-- Modal: Add block -->
+<div class="modal-overlay" id="block-modal">
+  <div class="modal">
+    <h3>Bloquer des dates</h3>
+    <form id="block-form">
+      <div class="form-row" style="margin-bottom:12px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label for="block-start">Date début</label>
+          <input type="date" id="block-start" required>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label for="block-end">Date fin</label>
+          <input type="date" id="block-end" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="block-reason">Raison</label>
+        <select id="block-reason">
+          <option value="blocked">Indisponible</option>
+          <option value="reserved">Réservation externe</option>
+          <option value="maintenance">Maintenance</option>
+          <option value="personal">Usage personnel</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="block-guest">Nom du voyageur (optionnel)</label>
+        <input type="text" id="block-guest" placeholder="ex: Jean Dupont">
+      </div>
+      <div class="form-group">
+        <label for="block-notes">Notes (optionnel)</label>
+        <input type="text" id="block-notes" placeholder="ex: Plombier prévu le mardi">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+        <button type="button" class="btn btn-outline btn-sm" id="cancel-block">Annuler</button>
+        <button type="submit" class="btn btn-primary btn-sm">Bloquer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toast-container" aria-live="assertive"></div>
+
+<!-- Mobile bottom navigation -->
+<nav class="mobile-bottom-nav" aria-label="Navigation mobile">
+  <div class="mobile-bottom-nav-inner">
+    <a class="bottom-nav-item" href="/index.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Logements</span>
+    </a>
+    <a class="bottom-nav-item" href="/index.html#conversations">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span>Messages</span>
+    </a>
+    <a class="bottom-nav-item active" href="/calendar.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Calendrier</span>
+    </a>
+    <a class="bottom-nav-item" href="/index.html#settings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>Réglages</span>
+    </a>
+  </div>
+</nav>
+
+<script src="app.js"></script>
+<script>
+  // Mobile sidebar toggle
+  function toggleSidebar() { document.getElementById('dashboard-sidebar').classList.toggle('open'); document.getElementById('sidebar-overlay').classList.toggle('open'); }
+  function closeSidebar() { document.getElementById('dashboard-sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('open'); }
+
+  checkAuth();
+  const _email = localStorage.getItem('user_email') || '';
+  document.getElementById('user-email').textContent = _email;
+  const _av = document.getElementById('sidebar-avatar');
+  if (_av && _email) _av.textContent = _email[0].toUpperCase();
+
+  let currentPropertyId = null;
+  let currentYear = new Date().getFullYear();
+  let currentMonth = new Date().getMonth();
+  let calendarEvents = [];    // from /api/properties/:id/calendar (manual blocks + reservations)
+  let icalEvents = [];        // from /api/calendar/:id (ical events)
+
+  const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const DAYS_FR = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+
+  // ================================================================
+  // Load properties
+  // ================================================================
+  async function loadProperties() {
+    try {
+      const data = await apiRequest('/api/properties');
+      const props = Array.isArray(data) ? data : (data.properties || []);
+      const select = document.getElementById('property-select');
+      if (props.length === 0) {
+        select.innerHTML = '<option value="">Aucun logement configuré</option>';
+        return;
+      }
+      select.innerHTML = props.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+      currentPropertyId = props[0].id;
+      loadAll();
+    } catch(e) { toast('error', e.message); }
+  }
+
+  document.getElementById('property-select').addEventListener('change', (e) => {
+    currentPropertyId = e.target.value;
+    if (currentPropertyId) loadAll();
+  });
+
+  function loadAll() {
+    loadIcalStatus();
+    loadCalendar();
+  }
+
+  // ================================================================
+  // iCal connection management
+  // ================================================================
+  async function loadIcalStatus() {
+    if (!currentPropertyId) return;
+
+    try {
+      const data = await apiRequest(`/api/calendar/${currentPropertyId}`);
+      updateIcalUI(data);
+
+      // Load iCal events for the calendar display
+      icalEvents = (data.events || []).map(ev => ({
+        start: ev.start_date,
+        end: ev.end_date,
+        type: ev.status === 'blocked' ? 'blocked' : 'reserved',
+        title: ev.summary || 'iCal',
+        source: 'ical'
+      }));
+
+      renderCalendar();
+    } catch(e) {
+      updateIcalUI({ connected: false });
+      icalEvents = [];
+    }
+  }
+
+  function updateIcalUI(data) {
+    const dot = document.getElementById('ical-dot');
+    const label = document.getElementById('ical-label');
+    const detail = document.getElementById('ical-detail');
+    const actions = document.getElementById('ical-actions');
+
+    if (data.connected && data.calendar) {
+      const cal = data.calendar;
+      dot.className = 'ical-dot ' + (cal.sync_status === 'ok' ? 'connected' : (cal.sync_status === 'error' ? 'disconnected' : 'syncing'));
+
+      label.textContent = 'Calendrier iCal connecté';
+      let detailText = '';
+      if (cal.last_synced_at) {
+        detailText = `Dernière sync : ${formatSyncDate(cal.last_synced_at)}`;
+      }
+      if (cal.sync_status === 'error' && cal.sync_error) {
+        detailText += ` — Erreur : ${cal.sync_error}`;
+      }
+      detail.textContent = detailText || 'Synchronisation en attente...';
+
+      actions.innerHTML = `
+        <button class="btn btn-outline btn-sm" id="ical-sync-btn">&#8635; Synchroniser</button>
+        <button class="btn btn-outline btn-sm" style="color:#EF4444;border-color:#EF4444;" id="ical-disconnect-btn">Déconnecter</button>
+      `;
+
+      document.getElementById('ical-sync-btn').addEventListener('click', syncIcal);
+      document.getElementById('ical-disconnect-btn').addEventListener('click', disconnectIcal);
+      document.getElementById('ical-form').style.display = 'none';
+      document.getElementById('ical-help').style.display = 'none';
+
+    } else {
+      dot.className = 'ical-dot disconnected';
+      label.textContent = 'Calendrier iCal non connecté';
+      detail.textContent = 'Ajoutez le lien iCal de votre logement Airbnb pour synchroniser automatiquement les disponibilités.';
+      actions.innerHTML = '<button class="btn btn-primary btn-sm" id="ical-connect-btn">Connecter un calendrier</button>';
+      document.getElementById('ical-connect-btn').addEventListener('click', showIcalForm);
+    }
+  }
+
+  function showIcalForm() {
+    document.getElementById('ical-form').style.display = 'flex';
+    document.getElementById('ical-help').style.display = 'block';
+    document.getElementById('ical-url').focus();
+  }
+
+  document.getElementById('ical-cancel-btn').addEventListener('click', () => {
+    document.getElementById('ical-form').style.display = 'none';
+    document.getElementById('ical-help').style.display = 'none';
+  });
+
+  document.getElementById('ical-save-btn').addEventListener('click', connectIcal);
+
+  async function connectIcal() {
+    const url = document.getElementById('ical-url').value.trim();
+    if (!url) { toast('error', 'Veuillez entrer une URL iCal'); return; }
+
+    const btn = document.getElementById('ical-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Connexion...';
+
+    try {
+      await apiRequest('/api/calendar/connect', {
+        method: 'POST',
+        body: { property_id: currentPropertyId, ical_url: url }
+      });
+      toast('success', 'Calendrier connecté et synchronisé !');
+      document.getElementById('ical-url').value = '';
+      loadAll();
+    } catch(e) {
+      toast('error', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Connecter';
+    }
+  }
+
+  async function syncIcal() {
+    const btn = document.getElementById('ical-sync-btn');
+    btn.disabled = true;
+    btn.textContent = '&#8635; Sync...';
+    document.getElementById('ical-dot').className = 'ical-dot syncing';
+
+    try {
+      const data = await apiRequest(`/api/calendar/${currentPropertyId}/sync`, { method: 'POST' });
+      toast('success', `Synchronisé : ${data.synced} événements`);
+      loadAll();
+    } catch(e) {
+      toast('error', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '&#8635; Synchroniser';
+    }
+  }
+
+  async function disconnectIcal() {
+    if (!confirm('Déconnecter le calendrier iCal ? Les événements importés seront supprimés.')) return;
+
+    try {
+      await apiRequest(`/api/calendar/${currentPropertyId}`, { method: 'DELETE' });
+      toast('success', 'Calendrier déconnecté');
+      icalEvents = [];
+      loadAll();
+    } catch(e) {
+      toast('error', e.message);
+    }
+  }
+
+  function formatSyncDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMin = Math.floor((now - d) / 60000);
+    if (diffMin < 1) return "à l'instant";
+    if (diffMin < 60) return `il y a ${diffMin} min`;
+    if (diffMin < 1440) return `il y a ${Math.floor(diffMin / 60)}h`;
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // ================================================================
+  // Calendar navigation
+  // ================================================================
+  document.getElementById('prev-month').addEventListener('click', () => {
+    currentMonth--;
+    if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+    loadCalendar();
+  });
+  document.getElementById('next-month').addEventListener('click', () => {
+    currentMonth++;
+    if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+    loadCalendar();
+  });
+
+  // ================================================================
+  // Load calendar data (manual blocks + reservations)
+  // ================================================================
+  async function loadCalendar() {
+    if (!currentPropertyId) return;
+
+    const from = `${currentYear}-${String(currentMonth + 1).padStart(2,'0')}-01`;
+    const lastDay = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const to = `${currentYear}-${String(currentMonth + 1).padStart(2,'0')}-${lastDay}`;
+
+    try {
+      const data = await apiRequest(`/api/properties/${currentPropertyId}/calendar?from=${from}&to=${to}`);
+      calendarEvents = data.events || [];
+      renderCalendar();
+    } catch(e) {
+      calendarEvents = [];
+      renderCalendar();
+    }
+  }
+
+  // ================================================================
+  // Render calendar grid (merged: manual + ical events)
+  // ================================================================
+  function renderCalendar() {
+    const grid = document.getElementById('cal-grid');
+    document.getElementById('cal-month-label').textContent = `${MONTHS_FR[currentMonth]} ${currentYear}`;
+
+    const allEvents = [...calendarEvents, ...icalEvents];
+
+    const firstDay = new Date(currentYear, currentMonth, 1);
+    const lastDay = new Date(currentYear, currentMonth + 1, 0);
+    let startDow = (firstDay.getDay() + 6) % 7;
+
+    let html = DAYS_FR.map(d => `<div class="cal-header">${d}</div>`).join('');
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // Previous month padding
+    for (let i = 0; i < startDow; i++) {
+      const d = new Date(currentYear, currentMonth, -startDow + i + 1);
+      html += `<div class="cal-day other-month"><div class="day-num">${d.getDate()}</div></div>`;
+    }
+
+    // Current month days
+    for (let day = 1; day <= lastDay.getDate(); day++) {
+      const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const isToday = dateStr === todayStr;
+
+      const dayEvents = allEvents.filter(ev => {
+        const evStart = ev.start || ev.start_date;
+        const evEnd = ev.end || ev.end_date;
+        return evStart <= dateStr && evEnd > dateStr;
+      });
+
+      html += `<div class="cal-day${isToday ? ' today' : ''}" data-date="${dateStr}">
+        <div class="day-num">${day}</div>
+        ${dayEvents.map(ev => {
+          let cls = 'blocked';
+          const evType = ev.type || ev.status || '';
+          if (evType === 'reservation') cls = 'reservation';
+          else if (evType === 'reserved') cls = 'reserved';
+          else if (evType === 'maintenance') cls = 'maintenance';
+          const title = ev.title || ev.summary || evType;
+          return `<div class="cal-event ${cls}" title="${escapeHtml(title)}">${escapeHtml(title)}</div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    // Next month padding
+    const totalCells = startDow + lastDay.getDate();
+    const remaining = (7 - (totalCells % 7)) % 7;
+    for (let i = 1; i <= remaining; i++) {
+      html += `<div class="cal-day other-month"><div class="day-num">${i}</div></div>`;
+    }
+
+    grid.innerHTML = html;
+
+    grid.querySelectorAll('.cal-day:not(.other-month)').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const date = cell.dataset.date;
+        document.getElementById('block-start').value = date;
+        const next = new Date(date);
+        next.setDate(next.getDate() + 1);
+        document.getElementById('block-end').value = next.toISOString().slice(0, 10);
+        openBlockModal();
+      });
+    });
+  }
+
+  // ================================================================
+  // Block modal
+  // ================================================================
+  function openBlockModal() {
+    document.getElementById('block-modal').classList.add('active');
+  }
+  function closeBlockModal() {
+    document.getElementById('block-modal').classList.remove('active');
+    document.getElementById('block-form').reset();
+  }
+
+  document.getElementById('add-block-btn').addEventListener('click', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    document.getElementById('block-start').value = today;
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    document.getElementById('block-end').value = tomorrow;
+    openBlockModal();
+  });
+  document.getElementById('cancel-block').addEventListener('click', closeBlockModal);
+  document.getElementById('block-modal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('block-modal')) closeBlockModal();
+  });
+
+  document.getElementById('block-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentPropertyId) return;
+
+    const body = {
+      start_date: document.getElementById('block-start').value,
+      end_date: document.getElementById('block-end').value,
+      reason: document.getElementById('block-reason').value,
+      guest_name: document.getElementById('block-guest').value || null,
+      notes: document.getElementById('block-notes').value || null
+    };
+
+    try {
+      await apiRequest(`/api/properties/${currentPropertyId}/calendar`, { method: 'POST', body });
+      closeBlockModal();
+      toast('success', 'Dates bloquées !');
+      loadCalendar();
+    } catch(err) { toast('error', err.message); }
+  });
+
+  // ================================================================
+  // Toast
+  // ================================================================
+  function toast(type, msg) {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    t.setAttribute('role', 'alert');
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, 3200);
+  }
+
+  // ================================================================
+  // Init
+  // ================================================================
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  loadProperties();
+</script>
+</body>
+</html>

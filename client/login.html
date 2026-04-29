@@ -1,0 +1,373 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Connectez-vous a votre agent IA Airbnb - reponses automatiques personnalisees pour vos logements.">
+  <title>Connexion - HostAI</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Aller au contenu principal</a>
+
+  <main class="auth-page" id="main-content">
+    <!-- Hero side -->
+    <aside class="auth-hero" aria-hidden="true">
+      <div class="auth-hero-icon">AI</div>
+      <h1>HostAI</h1>
+      <p>Une experience pro pour gerer vos messages voyageurs avec precision, rapidite et constance.</p>
+
+      <div class="auth-hero-features">
+        <div class="auth-hero-feature">
+          <span class="feat-icon"><i data-lucide="brain"></i></span>
+          <span>IA adaptee a chaque logement</span>
+        </div>
+        <div class="auth-hero-feature">
+          <span class="feat-icon"><i data-lucide="zap"></i></span>
+          <span>Reponses claires en quelques secondes</span>
+        </div>
+        <div class="auth-hero-feature">
+          <span class="feat-icon"><i data-lucide="link"></i></span>
+          <span>Connecte a Airbnb et vos integrations</span>
+        </div>
+        <div class="auth-hero-feature">
+          <span class="feat-icon"><i data-lucide="history"></i></span>
+          <span>Historique propre, centralise et actionnable</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Form side -->
+    <section class="auth-form-side">
+      <div style="max-width:400px; width:100%; margin:0 auto;">
+        <div class="auth-form-header">
+          <h2 id="form-title">Bon retour </h2>
+          <p id="form-subtitle">Connectez-vous pour acceder a votre tableau de bord.</p>
+        </div>
+
+        <div id="error-message" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
+        <div id="success-message" class="alert alert-success hidden" role="alert" aria-live="polite"></div>
+
+        <form id="auth-form" novalidate>
+          <div class="form-group">
+            <label for="email">Adresse email</label>
+            <input
+              type="email" id="email" name="email"
+              required autocomplete="email"
+              placeholder="vous@exemple.com"
+              aria-describedby="email-error"
+            >
+            <span id="email-error" class="form-error hidden" aria-live="polite"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="password">Mot de passe</label>
+            <div style="position:relative;">
+              <input
+                type="password" id="password" name="password"
+                required autocomplete="current-password"
+                placeholder=""
+                aria-describedby="password-error"
+                style="padding-right:46px;"
+              >
+              <button
+                type="button" id="toggle-pw"
+                class="btn btn-ghost btn-icon btn-sm"
+                style="position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:6px;"
+                aria-label="Afficher/masquer le mot de passe"
+              ></button>
+            </div>
+            <span id="password-error" class="form-error hidden" aria-live="polite"></span>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full btn-lg" id="submit-btn" style="margin-top:8px;">
+            Se connecter
+          </button>
+        </form>
+
+        <!-- Airbnb link section (visible during registration only) -->
+        <div id="airbnb-link-section" class="hidden" style="margin-top:16px;">
+          <div style="border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:16px;background:var(--clr-surface);">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.9rem;font-weight:600;color:var(--clr-text);">
+              <input type="checkbox" id="link-airbnb-check" style="width:18px;height:18px;accent-color:var(--clr-primary);">
+              Lier mon compte Airbnb
+            </label>
+            <p style="font-size:.78rem;color:var(--clr-text-muted);margin-top:6px;margin-bottom:0;">
+              Importez automatiquement tous vos logements depuis Airbnb.
+            </p>
+            <div id="airbnb-url-section" class="hidden" style="margin-top:12px;">
+              <label for="airbnb-profile-url" style="font-size:.82rem;font-weight:500;margin-bottom:4px;display:block;color:var(--clr-text);">URL de votre profil hôte Airbnb</label>
+              <input
+                type="url" id="airbnb-profile-url"
+                placeholder="https://www.airbnb.fr/users/show/123456789"
+                style="width:100%;padding:10px 12px;border:1px solid var(--clr-border);border-radius:var(--radius-sm);font-size:.88rem;"
+              >
+              <span style="font-size:.72rem;color:var(--clr-text-light);display:block;margin-top:4px;">
+                Trouvez-le dans Airbnb → votre photo de profil → «&nbsp;Voir le profil&nbsp;»
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import progress overlay -->
+        <div id="import-progress-overlay" class="hidden" style="margin-top:16px;">
+          <div style="border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:20px;background:var(--clr-surface);text-align:center;">
+            <div id="import-progress-spinner" style="margin:0 auto 12px;">
+              <span class="spinner" style="width:28px;height:28px;border-width:3px;display:inline-block;"></span>
+            </div>
+            <p id="import-progress-text" style="font-size:.88rem;font-weight:500;color:var(--clr-text);margin:0;">Importation en cours…</p>
+            <div id="import-progress-detail" style="font-size:.78rem;color:var(--clr-text-muted);margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <div class="auth-switch">
+          <span id="switch-text">Pas encore de compte ?</span>
+          <a href="#" id="switch-link"> Creer un compte</a>
+        </div>
+
+        <p class="auth-switch" style="margin-top:12px;font-size:.78rem;color:var(--clr-text-light);">
+          Compte demo : demo@hostai.com / demo1234
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
+
+  <script>
+    const form        = document.getElementById('auth-form');
+    const formTitle   = document.getElementById('form-title');
+    const formSubtitle= document.getElementById('form-subtitle');
+    const errorDiv    = document.getElementById('error-message');
+    const submitBtn   = document.getElementById('submit-btn');
+    const switchLink  = document.getElementById('switch-link');
+    const switchText  = document.getElementById('switch-text');
+    const togglePw    = document.getElementById('toggle-pw');
+    const pwInput     = document.getElementById('password');
+
+    let isRegister = false;
+
+    // Show/hide password
+    togglePw.addEventListener('click', () => {
+      const isHidden = pwInput.type === 'password';
+      pwInput.type  = isHidden ? 'text' : 'password';
+      togglePw.textContent = isHidden ? '' : '';
+    });
+
+    // Toggle Airbnb link checkbox
+    document.getElementById('link-airbnb-check').addEventListener('change', function() {
+      document.getElementById('airbnb-url-section').classList.toggle('hidden', !this.checked);
+    });
+
+    // Switch mode
+    switchLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      isRegister = !isRegister;
+      errorDiv.classList.add('hidden');
+
+      if (isRegister) {
+        formTitle.textContent = 'Creer un compte ';
+        formSubtitle.textContent = 'Commencez gratuitement, sans carte bancaire.';
+        submitBtn.textContent = "S'inscrire";
+        switchText.textContent = 'Deja un compte ?';
+        switchLink.textContent = ' Se connecter';
+        pwInput.autocomplete = 'new-password';
+        document.getElementById('airbnb-link-section').classList.remove('hidden');
+      } else {
+        formTitle.textContent = 'Bon retour ';
+        formSubtitle.textContent = 'Connectez-vous pour acceder a votre tableau de bord.';
+        submitBtn.textContent = 'Se connecter';
+        switchText.textContent = 'Pas encore de compte ?';
+        switchLink.textContent = ' Creer un compte';
+        pwInput.autocomplete = 'current-password';
+        document.getElementById('airbnb-link-section').classList.add('hidden');
+      }
+    });
+
+    // Form submit
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearErrors();
+
+      const email    = document.getElementById('email').value.trim();
+      const password = pwInput.value;
+      let valid = true;
+
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showFieldError('email-error', 'Veuillez entrer un email valide.');
+        valid = false;
+      }
+      if (!password || password.length < 6) {
+        showFieldError('password-error', 'Minimum 6 caracteres.');
+        valid = false;
+      }
+      if (!valid) return;
+
+      setLoading(true);
+
+      try {
+        const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+        const res  = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Une erreur est survenue');
+
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user_email', data.user.email);
+
+        // Check if user wants to link Airbnb
+        const airbnbCheck = document.getElementById('link-airbnb-check');
+        const airbnbUrl = document.getElementById('airbnb-profile-url')?.value?.trim();
+
+        if (isRegister && airbnbCheck?.checked && airbnbUrl) {
+          showToast('success', 'Compte créé ! Importation de vos logements…');
+          setLoading(false);
+          await autoImportAirbnbListings(data.token, airbnbUrl);
+        } else {
+          showToast('success', isRegister ? 'Compte cree ! Redirection...' : 'Connexion reussie !');
+          setTimeout(() => window.location.href = '/index.html', 900);
+        }
+      } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('hidden');
+        setLoading(false);
+      }
+    });
+
+    function setLoading(on) {
+      submitBtn.disabled = on;
+      submitBtn.textContent = on
+        ? (isRegister ? 'Inscription en cours...' : 'Connexion en cours...')
+        : (isRegister ? "S'inscrire" : 'Se connecter');
+    }
+
+    function showFieldError(id, msg) {
+      const el = document.getElementById(id);
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function clearErrors() {
+      errorDiv.classList.add('hidden');
+      document.querySelectorAll('.form-error').forEach(e => e.classList.add('hidden'));
+    }
+
+    function showToast(type, message) {
+      const c = document.getElementById('toast-container');
+      const t = document.createElement('div');
+      t.className = `toast toast-${type}`;
+      t.setAttribute('role', 'status');
+      t.textContent = (type === 'success' ? ' ' : ' ') + message;
+      c.appendChild(t);
+      setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, 3000);
+    }
+
+    // Already logged in?
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => { if (r.ok) window.location.href = '/index.html'; })
+        .catch(() => {});
+    }
+
+    // Auto-import Airbnb listings after registration
+    async function autoImportAirbnbListings(token, profileUrl) {
+      const overlay = document.getElementById('import-progress-overlay');
+      const progressText = document.getElementById('import-progress-text');
+      const progressDetail = document.getElementById('import-progress-detail');
+      const form = document.getElementById('auth-form');
+      const airbnbSection = document.getElementById('airbnb-link-section');
+
+      // Hide form, show progress
+      form.style.display = 'none';
+      airbnbSection.style.display = 'none';
+      overlay.classList.remove('hidden');
+      progressText.textContent = 'Recherche de vos logements Airbnb…';
+      progressDetail.textContent = '';
+
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      try {
+        // Step 1: Scan profile
+        const scanRes = await fetch('/api/properties/scan-airbnb-profile', {
+          method: 'POST', headers, body: JSON.stringify({ profileUrl })
+        });
+        const scanData = await scanRes.json();
+
+        if (!scanRes.ok || !scanData.listings?.length) {
+          progressText.textContent = 'Aucun logement trouvé sur ce profil.';
+          progressDetail.textContent = 'Vous pourrez les ajouter manuellement depuis le tableau de bord.';
+          document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="width:28px;height:28px;color:var(--clr-warning);"></i>';
+          setTimeout(() => window.location.href = '/index.html', 2500);
+          return;
+        }
+
+        const total = scanData.listings.length;
+        progressText.textContent = `${total} logement${total > 1 ? 's' : ''} trouvé${total > 1 ? 's' : ''} !`;
+        progressDetail.textContent = 'Importation en cours…';
+
+        // Step 2: Import each listing
+        let imported = 0;
+        for (const listing of scanData.listings) {
+          try {
+            progressDetail.textContent = `Importation ${imported + 1}/${total}…`;
+
+            const importRes = await fetch('/api/properties/import-airbnb', {
+              method: 'POST', headers, body: JSON.stringify({ url: listing.id })
+            });
+            const importData = await importRes.json();
+
+            if (importData.success && importData.data) {
+              const d = importData.data;
+              await fetch('/api/properties', {
+                method: 'POST', headers,
+                body: JSON.stringify({
+                  name: d.name, property_type: d.property_type,
+                  bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
+                  address: d.address || '', description: d.description || '', house_rules: d.house_rules || '',
+                  check_in_time: d.check_in_time || '', check_out_time: d.check_out_time || '', nearby: d.nearby || '',
+                  has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
+                  has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
+                  has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning,
+                  has_heating: d.has_heating, has_workspace: d.has_workspace,
+                  has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron,
+                  has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
+                  has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave,
+                  has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
+                  has_smoke_detector: d.has_smoke_detector, has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
+                  has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
+                  has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden,
+                  has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
+                  allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
+                  airbnb_listing_id: d.airbnb_listing_id, auto_reply_enabled: false, reply_tone: 'friendly'
+                })
+              });
+              imported++;
+            }
+          } catch (_) {}
+        }
+
+        // Step 3: Done
+        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="check-circle" style="width:28px;height:28px;color:var(--clr-success);"></i>';
+        progressText.textContent = `${imported} logement${imported > 1 ? 's' : ''} importé${imported > 1 ? 's' : ''} !`;
+        progressDetail.textContent = 'Redirection vers votre tableau de bord…';
+        setTimeout(() => window.location.href = '/index.html', 1500);
+
+      } catch (err) {
+        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="width:28px;height:28px;color:var(--clr-warning);"></i>';
+        progressText.textContent = 'Erreur lors de l\'importation.';
+        progressDetail.textContent = 'Redirection vers le tableau de bord…';
+        setTimeout(() => window.location.href = '/index.html', 2000);
+      }
+    }
+  </script>
+  <script>if (typeof lucide !== 'undefined') lucide.createIcons();</script>
+</body>
+</html>

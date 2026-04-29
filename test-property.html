@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test API Propriétés</title>
+</head>
+<body>
+  <h1>Test API Propriétés</h1>
+  <div id="result"></div>
+  
+  <script>
+    // Simuler un token de test
+    const testToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTcwODQzNjQwMH0.test';
+    localStorage.setItem('token', testToken);
+    
+    async function testCreateProperty() {
+      const result = document.getElementById('result');
+      
+      try {
+        const response = await fetch('http://localhost:3000/api/properties', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${testToken}`
+          },
+          body: JSON.stringify({
+            name: 'Test Villa',
+            property_type: 'villa',
+            bedrooms: 3,
+            beds: 4,
+            bathrooms: 2,
+            max_guests: 6,
+            has_wifi: true,
+            has_kitchen: true,
+            has_pool: true,
+            has_parking: true
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          result.innerHTML = '<pre style="color: green;">' + JSON.stringify(data, null, 2) + '</pre>';
+        } else {
+          result.innerHTML = '<pre style="color: red;">Erreur: ' + JSON.stringify(data, null, 2) + '</pre>';
+        }
+      } catch (error) {
+        result.innerHTML = '<pre style="color: red;">Erreur: ' + error.message + '</pre>';
+      }
+    }
+    
+    // Lancer le test au chargement
+    testCreateProperty();
+  </script>
+</body>
+</html>

@@ -1,0 +1,2615 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tableau de bord - HostAI</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Aller au contenu</a>
+
+<!-- HEADER (hidden on dashboard — sidebar has brand + user) -->
+<header role="banner">
+  <div class="container">
+    <a href="/index.html" class="logo" aria-label="HostAI - Accueil">
+      HostAI
+    </a>
+    <nav class="header-nav" aria-label="Navigation principale">
+    </nav>
+  </div>
+</header>
+
+<!-- LAYOUT -->
+<div class="dashboard-layout" id="main-content">
+
+  <!-- Mobile top bar -->
+  <div class="mobile-topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="mobile-topbar-title">HostAI</span>
+  </div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      </div>
+      <span class="sidebar-brand-name">HostAI</span>
+      <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
+    </div>
+
+    <span class="sidebar-section-label">Navigation</span>
+    <button class="nav-item active" onclick="showSection('properties')" id="nav-properties" aria-current="page">
+      <span class="nav-icon"><i data-lucide="home"></i></span> Propriétés
+    </button>
+    <button class="nav-item" onclick="showSection('conversations')" id="nav-conversations">
+      <span class="nav-icon"><i data-lucide="message-square"></i></span> Conversations
+      <span class="nav-badge" id="conv-count" style="display:none">0</span>
+    </button>
+    <button class="nav-item" onclick="showSection('integrations')" id="nav-integrations">
+      <span class="nav-icon"><i data-lucide="link"></i></span> Intégrations
+    </button>
+    <a class="nav-item" href="/calendar.html" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="calendar"></i></span> Calendrier
+    </a>
+
+    <div class="sidebar-spacer"></div>
+
+    <span class="sidebar-section-label">Compte</span>
+    <button class="nav-item" onclick="showSection('settings')" id="nav-settings">
+      <span class="nav-icon"><i data-lucide="settings"></i></span> Paramètres
+    </button>
+
+    <div class="sidebar-user">
+      <div class="sidebar-user-avatar" id="sidebar-avatar">H</div>
+      <div class="sidebar-user-info">
+        <span class="sidebar-user-email" id="user-email"></span>
+      </div>
+      <button class="btn btn-ghost btn-icon sidebar-logout-btn" id="logout-btn" aria-label="Se déconnecter" title="Déconnexion">
+        <i data-lucide="log-out"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="dashboard-main">
+
+    <section class="dashboard-hero" aria-label="Vue d'ensemble">
+      <div class="dashboard-hero-content">
+        <p class="dashboard-hero-eyebrow">HostAI Workspace</p>
+        <h1 class="dashboard-hero-title" id="dashboard-hero-title">Pilotage des conversations voyageurs</h1>
+        <p class="dashboard-hero-subtitle">Une vue claire de vos logements, messages et automatisations, pour répondre vite avec une qualité constante.</p>
+        <div class="dashboard-hero-metrics">
+          <span class="hero-metric-pill"><strong id="hero-kpi-properties">0</strong> logements</span>
+          <span class="hero-metric-pill"><strong id="hero-kpi-conversations">0</strong> conversations</span>
+          <span class="hero-metric-pill"><strong id="hero-kpi-messages">0</strong> messages</span>
+        </div>
+      </div>
+      <div class="dashboard-hero-actions">
+        <button class="btn btn-outline" onclick="showSection('conversations')">Voir les conversations</button>
+        <button class="btn btn-primary" onclick="document.getElementById('new-property-btn').click()">Nouveau logement</button>
+      </div>
+    </section>
+
+    <!-- Stats row -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card stat-blue">
+        <span class="stat-icon"><i data-lucide="home"></i></span>
+        <div class="stat-value" id="stat-properties">-</div>
+        <div class="stat-label">Propriétés</div>
+      </div>
+      <div class="stat-card stat-green">
+        <span class="stat-icon"><i data-lucide="message-square"></i></span>
+        <div class="stat-value" id="stat-conversations">-</div>
+        <div class="stat-label">Conversations</div>
+      </div>
+      <div class="stat-card stat-orange">
+        <span class="stat-icon"><i data-lucide="bot"></i></span>
+        <div class="stat-value" id="stat-autoreplies">-</div>
+        <div class="stat-label">Réponses auto actives</div>
+      </div>
+      <div class="stat-card stat-red">
+        <span class="stat-icon"><i data-lucide="mail"></i></span>
+        <div class="stat-value" id="stat-messages">-</div>
+        <div class="stat-label">Messages traités</div>
+      </div>
+    </div>
+
+    <div id="error-message" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
+
+    <!-- === SECTION: PROPERTIES === -->
+    <section id="section-properties" class="workspace-section" aria-labelledby="properties-title">
+      <div class="section-header">
+        <div class="section-heading">
+          <p class="section-kicker">Portfolio</p>
+          <h2 id="properties-title">Mes propriétés</h2>
+          <p class="section-description">Centralisez les informations utiles de chaque logement pour générer des réponses fiables et cohérentes.</p>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-outline btn-sm" id="import-airbnb-btn" aria-label="Connecter Airbnb" style="border-color:var(--clr-primary);color:var(--clr-primary);gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
+            Connecter Airbnb
+          </button>
+          <button class="btn btn-primary" id="new-property-btn" aria-label="Ajouter une propriété">
+            + Ajouter
+          </button>
+        </div>
+      </div>
+
+      <div id="properties-loading" class="loading" aria-live="polite">
+        <div class="spinner" role="status" aria-label="Chargement"></div>
+        <p>Chargement des propriétés...</p>
+      </div>
+
+      <div id="properties-list" class="properties-list hidden" aria-live="polite"></div>
+
+      <div id="empty-properties" class="empty-state hidden">
+        <div class="empty-state-icon"><i data-lucide="home"></i></div>
+        <h3>Aucune propriété</h3>
+        <p>Ajoutez votre premier logement pour que l'IA puisse répondre avec les bonnes informations.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('new-property-btn').click()">
+          Ajouter une propriété
+        </button>
+      </div>
+    </section>
+
+    <!-- === SECTION: CONVERSATIONS === -->
+    <section id="section-conversations" aria-labelledby="conversations-title" class="workspace-section hidden">
+      <div class="section-header">
+        <div class="section-heading">
+          <p class="section-kicker">Inbox</p>
+          <h2 id="conversations-title">Conversations</h2>
+          <p class="section-description">Suivez les échanges entrants, priorisez les réponses et déclenchez vos automatisations au bon moment.</p>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-outline btn-sm" id="purge-non-airbnb-btn" onclick="purgeNonAirbnb()" aria-label="Supprimer les conversations non-Airbnb" style="border-color:var(--clr-danger);color:var(--clr-danger);">
+            Purger non-Airbnb
+          </button>
+          <button class="btn btn-primary" id="new-conversation-btn" aria-label="Nouvelle conversation">
+            + Nouvelle
+          </button>
+        </div>
+      </div>
+
+      <div id="conversations-loading" class="loading" aria-live="polite">
+        <div class="spinner" role="status" aria-label="Chargement"></div>
+      </div>
+
+      <div id="conversations-list" class="conversations-list hidden" aria-live="polite"></div>
+
+      <div id="empty-conversations" class="empty-state hidden">
+        <div class="empty-state-icon"><i data-lucide="message-square"></i></div>
+        <h3>Aucune conversation</h3>
+        <p>Créez une conversation pour simuler et générer des réponses IA.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('new-conversation-btn').click()">
+          Première conversation
+        </button>
+      </div>
+    </section>
+
+    <!-- === SECTION: INTEGRATIONS === -->
+    <section id="section-integrations" aria-labelledby="integrations-title" class="workspace-section hidden">
+      <div class="section-header">
+        <div class="section-heading">
+          <p class="section-kicker">Connecteurs</p>
+          <h2 id="integrations-title">Intégrations</h2>
+          <p class="section-description">Connectez vos canaux clés pour récupérer vos messages et enrichir automatiquement votre espace de travail.</p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <h3 style="margin-bottom:16px;">Plateformes connectées</h3>
+
+        <div class="integration-card" id="gmail-card">
+          <div class="integration-logo" style="font-size:1.4rem;"><i data-lucide="mail"></i></div>
+          <div class="integration-info">
+            <h4>Gmail — Notifications Airbnb</h4>
+            <p id="gmail-status-text">Connectez votre Gmail pour recevoir automatiquement les messages Airbnb dans vos conversations.</p>
+          </div>
+          <button class="btn btn-sm btn-primary" id="gmail-connect-btn" onclick="connectGmail()" aria-label="Connecter Gmail">
+            Connecter Gmail
+          </button>
+        </div>
+
+        <div id="gmail-accounts-list" class="hidden" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- === SECTION: SETTINGS === -->
+    <section id="section-settings" aria-labelledby="settings-title" class="workspace-section hidden">
+      <div class="section-header">
+        <div class="section-heading">
+          <p class="section-kicker">Préférences</p>
+          <h2 id="settings-title">Paramètres</h2>
+          <p class="section-description">Ajustez l’apparence, la session et les préférences globales de votre espace HostAI.</p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Apparence</h3></div>
+        <div class="form-group" style="margin-top:12px;">
+          <label style="font-weight:500;margin-bottom:8px;display:block;">Thème de l'application</label>
+          <div style="display:flex;gap:12px;">
+            <button type="button" class="btn btn-outline theme-btn" id="theme-light-btn" onclick="setTheme('light')" style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="sun" style="width:18px;height:18px;"></i> Clair
+            </button>
+            <button type="button" class="btn btn-outline theme-btn" id="theme-dark-btn" onclick="setTheme('dark')" style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="moon" style="width:18px;height:18px;"></i> Sombre
+            </button>
+          </div>
+          <span class="form-hint" style="margin-top:8px;">Choisissez entre le mode clair ou sombre.</span>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Clé API</h3></div>
+        <form id="settings-form">
+          <div class="form-group">
+            <label for="openai-key">Clé API OpenAI</label>
+            <input type="password" id="openai-key" placeholder="sk-..." autocomplete="off" aria-label="Clé API OpenAI">
+            <span class="form-hint">Utilisée pour la génération des réponses IA. Se configure dans le fichier .env du serveur.</span>
+          </div>
+          <button type="submit" class="btn btn-primary">Sauvegarder</button>
+        </form>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Session</h3></div>
+        <div style="margin-top:12px;">
+          <p style="font-size:.875rem;color:var(--clr-text-secondary);margin-bottom:14px;">Vous êtes connecté en tant que <strong id="settings-user-email"></strong>.</p>
+          <button type="button" class="btn btn-danger" onclick="logout()" style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="log-out" style="width:18px;height:18px;"></i> Se déconnecter
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- MODAL: Import Airbnb -->
+<div id="import-airbnb-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-import-title">
+  <div class="modal-box" style="max-width:560px;">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:40px;height:40px;background:var(--clr-bg);border:1px solid var(--clr-border);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--clr-text-muted)"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
+        </div>
+        <div>
+          <h2 id="modal-import-title" class="card-title">Connecter Airbnb</h2>
+          <p style="font-size:.78rem;color:var(--clr-text-muted);margin:0;">Importez vos logements en quelques clics</p>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-icon" id="close-import-modal-btn" aria-label="Fermer">✕</button>
+    </div>
+    <div class="modal-body">
+            <!-- Etape 1 : URL profil hote ou logement -->
+      <div id="import-step-url">
+        <p style="font-size:.9rem;color:var(--clr-text-muted);margin-bottom:14px;">Copiez votre <strong>URL de profil hôte</strong> pour voir tous vos logements d&rsquo;un coup, ou l&rsquo;URL d&rsquo;un logement spécifique.</p>
+        <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:12px 14px;margin-bottom:16px;font-size:.82rem;color:var(--clr-text-muted);line-height:1.6;">
+          <strong>Où trouver votre URL de profil ?</strong><br>
+          Airbnb &rarr; votre photo &rarr; &laquo;&nbsp;Voir le profil&nbsp;&raquo; &rarr; copier l&rsquo;URL<br>
+          <span style="font-family:monospace;font-size:.78rem;opacity:.8;">Ex : airbnb.fr/users/show/123456789</span>
+        </div>
+        <div class="form-group">
+          <label for="airbnb-url-input">URL Airbnb (profil hôte ou logement)</label>
+          <input type="url" id="airbnb-url-input" placeholder="https://www.airbnb.fr/users/show/123456..." autocomplete="off">
+          <span class="form-hint">Profil = tous vos logements &bull; airbnb.fr/rooms/12345 = un seul logement</span>
+        </div>
+        <div id="import-error" class="alert alert-error hidden" role="alert"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+          <button type="button" class="btn btn-outline" onclick="closeImportModal()">Annuler</button>
+          <button type="button" class="btn btn-primary" id="import-fetch-btn" onclick="fetchAirbnbListing()">
+            <span id="import-fetch-label">Continuer &rarr;</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Etape 2a : Grille des logements (profil hote) -->
+      <div id="import-step-grid" class="hidden">
+        <div id="import-grid-header" style="margin-bottom:14px;font-size:.9rem;color:var(--clr-text-muted);"></div>
+        <div id="profile-listing-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;max-height:380px;overflow-y:auto;padding-right:4px;"></div>
+        <div style="display:flex;justify-content:flex-start;margin-top:16px;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="resetImportModal()">&larr; Retour</button>
+        </div>
+      </div>
+
+      <!-- Etape 2b : Apercu logement unique -->
+<!-- Step 2: Preview -->
+      <div id="import-step-preview" class="hidden">
+        <div id="import-preview-card" class="import-preview-card"></div>
+        <div id="import-warning" class="alert alert-warning hidden" style="margin-top:12px;"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="resetImportModal()" style="margin-right:auto;">← Retour</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openFormWithImport()" title="Vérifier et modifier les informations avant de sauvegarder">Modifier d&rsquo;abord</button>
+          <button type="button" class="btn btn-primary" id="confirm-import-btn" onclick="confirmImport()">
+            ✓ Importer maintenant
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nouvelle propriete -->
+<div id="new-property-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-prop-title">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-prop-title" class="card-title">Ajouter une propriété</h2>
+      <button class="btn btn-ghost btn-icon" id="close-property-modal-btn" aria-label="Fermer">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="new-property-form" novalidate>
+        <!-- Base -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="clipboard-list"></i> Informations de base</div>
+          <div class="form-group">
+            <label for="property-name">Nom *</label>
+            <input type="text" id="property-name" required placeholder="Ex: Villa Paradis, Studio Centre">
+          </div>
+          <div class="form-group">
+            <label for="property-type">Type *</label>
+            <select id="property-type" required>
+              <option value="">-- Selectionnez --</option>
+              <option value="apartment">Appartement</option>
+              <option value="house">Maison</option>
+              <option value="villa">Villa</option>
+              <option value="studio">Studio</option>
+              <option value="loft">Loft</option>
+              <option value="chalet">Chalet</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bedrooms">Chambres *</label>
+              <input type="number" id="bedrooms" required min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label for="beds">Lits *</label>
+              <input type="number" id="beds" required min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label for="bathrooms">SDB *</label>
+              <input type="number" id="bathrooms" required min="0" step="0.5" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label for="max-guests">Voyageurs max *</label>
+              <input type="number" id="max-guests" required min="1" placeholder="1">
+            </div>
+          </div>
+        </div>
+
+        <!-- Infos pratiques -->
+        <!-- <i data-lucide="door-open"></i> Arrivée, accès & départ -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="door-open"></i> Arrivée, accès & départ <span style="font-size:.75rem;font-weight:400;color:var(--clr-text-muted);">(questions les + fréquentes des voyageurs)</span></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="check-in-time">Heure check-in</label>
+              <input type="text" id="check-in-time" placeholder="Ex: 15:00">
+            </div>
+            <div class="form-group">
+              <label for="check-out-time">Heure check-out</label>
+              <input type="text" id="check-out-time" placeholder="Ex: 11:00">
+            </div>
+            <div class="form-group">
+              <label for="checkin-method">Méthode d'arrivée</label>
+              <select id="checkin-method">
+                <option value="">--</option>
+                <option value="self-checkin">Arrivée autonome</option>
+                <option value="lockbox">Boîte à clés</option>
+                <option value="in-person">Remise en main propre</option>
+                <option value="smart-lock">Serrure connectée</option>
+                <option value="concierge">Concierge / Gardien</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="key-location">Emplacement clés / boîte à clés</label>
+            <textarea id="key-location" rows="2" placeholder="Ex: Boîte à clés noire à droite de la porte, code 4589"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="access-code">Code d'accès / digicode</label>
+              <input type="text" id="access-code" placeholder="Ex: A1234B">
+            </div>
+            <div class="form-group">
+              <label for="gate-code">Code portail / interphone</label>
+              <input type="text" id="gate-code" placeholder="Ex: #1234 ou Nom DUPONT">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="building-entry">Instructions accès immeuble</label>
+            <textarea id="building-entry" rows="2" placeholder="Ex: Entrer par la cour, bâtiment B, escalier gauche"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="floor-number">Étage / n° d'appartement</label>
+              <input type="text" id="floor-number" placeholder="Ex: 3ème étage, porte droite">
+            </div>
+            <div class="form-group">
+              <label for="luggage-storage">Consigne bagages</label>
+              <select id="luggage-storage">
+                <option value="">--</option>
+                <option value="before-checkin">Avant check-in</option>
+                <option value="after-checkout">Après check-out</option>
+                <option value="both">Avant et après</option>
+                <option value="none">Non disponible</option>
+              </select>
+            </div>
+          </div>
+          <label class="checkbox-item" style="margin-bottom:12px;"><input type="checkbox" id="has-elevator"><span> Ascenseur disponible</span></label>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="early-checkin">Check-in anticipé</label>
+              <input type="text" id="early-checkin" placeholder="Ex: Possible dès 12h, supplément 20€">
+            </div>
+            <div class="form-group">
+              <label for="late-checkout">Check-out tardif</label>
+              <input type="text" id="late-checkout" placeholder="Ex: Possible jusqu'à 14h, 20€">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="checkout-instructions">Instructions de départ</label>
+            <textarea id="checkout-instructions" rows="3" placeholder="Ex: Laisser les clés sur la table, sortir les poubelles, fermer les volets, lancer une machine si draps utilisés..."></textarea>
+          </div>
+        </div>
+
+        <!-- <i data-lucide="wifi"></i> WiFi & Connectivité -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="wifi"></i> WiFi & Connectivité</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="wifi-name">Nom réseau WiFi</label>
+              <input type="text" id="wifi-name" placeholder="Ex: MonWiFi_2G">
+            </div>
+            <div class="form-group">
+              <label for="wifi-password">Mot de passe WiFi</label>
+              <input type="text" id="wifi-password" placeholder="Ex: MonMotDePasse123" autocomplete="off">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="wifi-speed">Débit internet</label>
+              <input type="text" id="wifi-speed" placeholder="Ex: 100 Mbps fibre">
+            </div>
+            <div class="form-group">
+              <label for="mobile-coverage">Couverture mobile</label>
+              <select id="mobile-coverage">
+                <option value="">--</option>
+                <option value="excellent">Excellente (4G/5G)</option>
+                <option value="good">Bonne</option>
+                <option value="poor">Faible</option>
+                <option value="none">Aucune couverture</option>
+              </select>
+            </div>
+          </div>
+          <label class="checkbox-item"><input type="checkbox" id="has-ethernet"><span> Prise Ethernet disponible</span></label>
+        </div>
+
+        <!-- <i data-lucide="car"></i> Transport & Localisation -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="car"></i> Transport & Localisation</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="neighborhood-name">Quartier / Lieu</label>
+              <input type="text" id="neighborhood-name" placeholder="Ex: Marais, Vieux-Port, Centre historique">
+            </div>
+            <div class="form-group">
+              <label for="distance-center">Distance centre-ville</label>
+              <input type="text" id="distance-center" placeholder="Ex: 5 min à pied, 2 km">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="distance-beach">Distance plage</label>
+              <input type="text" id="distance-beach" placeholder="Ex: 500m, 5 min à pied">
+            </div>
+            <div class="form-group">
+              <label for="distance-ski">Distance pistes de ski</label>
+              <input type="text" id="distance-ski" placeholder="Ex: Navette gratuite 10 min">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="nearest-airport">Aéroport le plus proche</label>
+            <input type="text" id="nearest-airport" placeholder="Ex: Aéroport Nice Côte d'Azur, 20 min en voiture">
+          </div>
+          <div class="form-group">
+            <label for="airport-transfer">Comment venir depuis l'aéroport/gare</label>
+            <textarea id="airport-transfer" rows="2" placeholder="Ex: Bus 98 direct (2€, 30min), taxi ~35€, navette dispo sur demande"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nearest-train">Gare la plus proche</label>
+              <input type="text" id="nearest-train" placeholder="Ex: Gare Saint-Charles, 10 min métro">
+            </div>
+            <div class="form-group">
+              <label for="nearest-metro-bus">Métro / Bus le plus proche</label>
+              <input type="text" id="nearest-metro-bus" placeholder="Ex: Métro L1 station Vieux-Port, 200m">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="parking-info">Instructions parking</label>
+            <textarea id="parking-info" rows="2" placeholder="Ex: Parking gratuit devant le logement. Garage dispo. Parking payant à 100m."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="parking-type">Type de parking</label>
+              <select id="parking-type">
+                <option value="">--</option>
+                <option value="free-street">Gratuit (rue)</option>
+                <option value="free-private">Gratuit (privé)</option>
+                <option value="paid-street">Payant (rue)</option>
+                <option value="paid-garage">Payant (garage)</option>
+                <option value="private-garage">Garage privé</option>
+                <option value="none">Pas de parking</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="paid-parking">Détails parking payant</label>
+              <input type="text" id="paid-parking" placeholder="Ex: 15€/jour, Parking Effia à 100m">
+            </div>
+          </div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-taxi-uber"><span> Taxi/Uber disponible</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-ev-charging"><span> Borne recharge électrique</span></label>
+          </div>
+          <div class="form-group">
+            <label for="nearby">À proximité (résumé)</label>
+            <textarea id="nearby" rows="2" placeholder="Ex: Métro L2 à 200m, supermarchés, restaurants, plage à 5 min"></textarea>
+          </div>
+        </div>
+
+        <!-- Commerces & Services -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="store"></i> Commerces & Services à proximité</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nearest-supermarket">Supermarché</label>
+              <input type="text" id="nearest-supermarket" placeholder="Ex: Carrefour City à 200m, ouvert 8h-22h">
+            </div>
+            <div class="form-group">
+              <label for="nearest-bakery">Boulangerie</label>
+              <input type="text" id="nearest-bakery" placeholder="Ex: En bas de l'immeuble, fermée lundi">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nearest-restaurant">Restaurants recommandés</label>
+              <input type="text" id="nearest-restaurant" placeholder="Ex: Le Petit Nice, Pizza Roma à 100m">
+            </div>
+            <div class="form-group">
+              <label for="nearest-pharmacy">Pharmacie</label>
+              <input type="text" id="nearest-pharmacy" placeholder="Ex: Pharmacie du Port, 300m">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nearest-hospital">Hôpital / Urgences</label>
+              <input type="text" id="nearest-hospital" placeholder="Ex: Hôpital Timone, 15 min voiture">
+            </div>
+            <div class="form-group">
+              <label for="nearest-atm">Distributeur / Banque</label>
+              <input type="text" id="nearest-atm" placeholder="Ex: BNP Paribas à 100m">
+            </div>
+          </div>
+        </div>
+
+        <!-- Equipements -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="sofa"></i> Équipements</div>
+          <div class="checkbox-grid">
+            <span class="checkbox-category">Essentiels</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-wifi"><span> Wi-Fi</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-kitchen"><span> Cuisine</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-parking"><span> Parking</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-air-conditioning"><span> Climatisation</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-heating"><span> Chauffage</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-workspace"><span> Bureau/Espace travail</span></label>
+            <span class="checkbox-category">Divertissement</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-tv"><span> TV</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-netflix"><span> Netflix / Streaming</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-fireplace"><span> Cheminée</span></label>
+            <span class="checkbox-category">Salle de bain</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-bathtub"><span> Baignoire</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-hair-dryer"><span> Sèche-cheveux</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-iron"><span> Fer à repasser</span></label>
+            <span class="checkbox-category">Cuisine équipée</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-washing-machine"><span> Lave-linge</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-dryer"><span> Sèche-linge</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-dishwasher"><span> Lave-vaisselle</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-microwave"><span> Micro-ondes</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-refrigerator"><span> Réfrigérateur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-coffee-maker"><span> Machine à café</span></label>
+            <span class="checkbox-category">Extérieur & Loisirs</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-pool"><span> Piscine</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-gym"><span> Salle de sport</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-bbq"><span> Barbecue</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-terrace"><span> Terrasse / Balcon</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-garden"><span> Jardin</span></label>
+            <span class="checkbox-category">Sécurité</span>
+            <label class="checkbox-item"><input type="checkbox" id="has-smoke-detector"><span> Détecteur de fumée</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-carbon-monoxide-detector"><span> Détecteur CO</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-fire-extinguisher"><span> Extincteur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-first-aid-kit"><span> Trousse de secours</span></label>
+          </div>
+        </div>
+
+        <!-- Cuisine & Repas -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="utensils"></i> Cuisine & Repas (détails)</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-oven"><span> Four</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-toaster"><span> Grille-pain</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-kettle"><span> Bouilloire</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-blender"><span> Mixeur / Blender</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-basic-condiments"><span> Condiments de base</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-breakfast"><span> Petit-déjeuner inclus</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="stove-type">Type de plaque de cuisson</label>
+              <select id="stove-type">
+                <option value="">--</option>
+                <option value="gas">Gaz</option>
+                <option value="electric">Électrique</option>
+                <option value="induction">Induction</option>
+                <option value="vitro">Vitrocéramique</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="drinking-water">Eau potable</label>
+              <select id="drinking-water">
+                <option value="">--</option>
+                <option value="tap-safe">Eau du robinet potable</option>
+                <option value="filter">Eau filtrée (carafe/filtre)</option>
+                <option value="bottled">Eau en bouteille fournie</option>
+                <option value="tap-unsafe">Robinet non potable</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="kitchen-equipment-details">Détails équipement cuisine</label>
+            <textarea id="kitchen-equipment-details" rows="2" placeholder="Ex: Nespresso avec capsules, plancha, wok, robot pâtissier, casseroles complètes..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="breakfast-details">Détails petit-déjeuner</label>
+            <input type="text" id="breakfast-details" placeholder="Ex: Café, thé, jus, croissants fournis chaque matin">
+          </div>
+        </div>
+
+        <!-- <i data-lucide="bed-double"></i> Chambres & Literie -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="bed-double"></i> Chambres & Literie</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-extra-bed"><span> Lit supplémentaire disponible</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-blackout-curtains"><span> Rideaux occultants</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-linen"><span> Linge de lit fourni</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-children-bed"><span> Lit enfant</span></label>
+          </div>
+          <div class="form-group">
+            <label for="bed-types">Détail des lits par chambre</label>
+            <textarea id="bed-types" rows="2" placeholder="Ex: Chambre 1: lit King 180x200, Chambre 2: 2 lits simples 90x190, Canapé-lit salon"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="extra-bed-fee">Frais lit supplémentaire</label>
+              <input type="text" id="extra-bed-fee" placeholder="Ex: 15€/nuit">
+            </div>
+            <div class="form-group">
+              <label for="linen-change">Changement draps</label>
+              <input type="text" id="linen-change" placeholder="Ex: Tous les 3 jours">
+            </div>
+          </div>
+        </div>
+
+        <!-- Salle de bain détaillée -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="bath"></i> Salle de bain (détails)</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-toiletries"><span> Produits de toilette fournis</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-towels"><span> Serviettes fournies</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-bidet"><span> Bidet</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="shower-type">Type de douche</label>
+              <select id="shower-type">
+                <option value="">--</option>
+                <option value="walk-in">Douche italienne</option>
+                <option value="bathtub-combo">Baignoire + douche</option>
+                <option value="rain-shower">Douche pluie</option>
+                <option value="standard">Douche standard</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="hot-water-type">Type d'eau chaude</label>
+              <select id="hot-water-type">
+                <option value="">--</option>
+                <option value="unlimited">Illimitée (chaudière)</option>
+                <option value="tank">Cumulus (limité)</option>
+                <option value="instant">Instantanée (gaz)</option>
+                <option value="solar">Solaire</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="hot-water-instructions">Instructions eau chaude</label>
+            <input type="text" id="hot-water-instructions" placeholder="Ex: Attendre 30s, ballon de 200L">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="towel-change">Changement serviettes</label>
+              <input type="text" id="towel-change" placeholder="Ex: Toutes les 3 nuits">
+            </div>
+            <div class="form-group">
+              <label for="second-bathroom-details">2ème SDB (si applicable)</label>
+              <input type="text" id="second-bathroom-details" placeholder="Ex: SDB privée chambre 2, douche">
+            </div>
+          </div>
+        </div>
+
+        <!-- <i data-lucide="sparkles"></i> Ménage & Linge -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="sparkles"></i> Ménage & Linge</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-cleaning-products"><span> Produits ménagers fournis</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-vacuum"><span> Aspirateur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-iron-board"><span> Table à repasser</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cleaning-frequency">Ménage pendant séjour</label>
+              <select id="cleaning-frequency">
+                <option value="">--</option>
+                <option value="none">Aucun (sauf demande)</option>
+                <option value="daily">Quotidien</option>
+                <option value="weekly">Hebdomadaire</option>
+                <option value="on-request">Sur demande (payant)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="washing-instructions">Instructions lave-linge</label>
+            <input type="text" id="washing-instructions" placeholder="Ex: Programme coton 40°, lessive sous l'évier">
+          </div>
+          <div class="form-group">
+            <label for="dryer-instructions">Instructions sèche-linge</label>
+            <input type="text" id="dryer-instructions" placeholder="Ex: Programme délicat, étendoir sur balcon">
+          </div>
+        </div>
+
+        <!-- Extérieur & Loisirs détaillés -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="trees"></i> Extérieur & Loisirs (détails)</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-pool-heated"><span> Piscine chauffée</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-jacuzzi"><span> Jacuzzi / Spa</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-beach-access"><span> Accès plage</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-beach-towels"><span> Serviettes de plage</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-outdoor-furniture"><span> Mobilier extérieur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-outdoor-dining"><span> Coin repas extérieur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-private-entrance"><span> Entrée privée</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-bike-storage"><span> Local vélos</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-bikes"><span> Vélos disponibles</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="pool-type">Type de piscine</label>
+              <select id="pool-type">
+                <option value="">--</option>
+                <option value="private">Privée</option>
+                <option value="shared">Partagée</option>
+                <option value="indoor">Intérieure</option>
+                <option value="rooftop">Rooftop</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="pool-hours">Horaires piscine</label>
+              <input type="text" id="pool-hours" placeholder="Ex: 8h-21h, non surveillée">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="jacuzzi-availability">Période de fonctionnement jacuzzi</label>
+              <select id="jacuzzi-availability">
+                <option value="">--</option>
+                <option value="all-year">Toute l'année</option>
+                <option value="summer">Été uniquement (mai-sept)</option>
+                <option value="winter">Hiver uniquement (oct-avril)</option>
+                <option value="seasonal">Saisonnier (voir détails)</option>
+                <option value="off">Actuellement hors service</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="jacuzzi-notes">Détails jacuzzi / période</label>
+              <input type="text" id="jacuzzi-notes" placeholder="Ex: Fermé en déc-janv, 38°C, max 4 pers, serviettes fournies">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="bikes-details">Détails vélos</label>
+            <input type="text" id="bikes-details" placeholder="Ex: 2 VTT adultes + 1 vélo enfant, cadenas fournis">
+          </div>
+          <div class="form-group">
+            <label for="outdoor-other">Autres activités / loisirs à proximité</label>
+            <textarea id="outdoor-other" rows="3" placeholder="Ex: Paintball à 2km, parcours accrobranche 10min, spot de surf à 500m, sentier de randonnée depuis le jardin, terrain de pétanque..."></textarea>
+          </div>
+        </div>
+
+        <!-- Divertissement étendu -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="gamepad-2"></i> Divertissement (détails)</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-game-console"><span> Console de jeux</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-board-games"><span> Jeux de société</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-books"><span> Bibliothèque / Livres</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-sound-system"><span> Enceinte / Système audio</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-projector"><span> Vidéoprojecteur</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-smart-home"><span> Maison connectée (Alexa, Google)</span></label>
+          </div>
+          <div class="form-group">
+            <label for="cable-channels">Chaînes TV / Streaming</label>
+            <input type="text" id="cable-channels" placeholder="Ex: Netflix, Disney+, Canal+, chaînes TNT">
+          </div>
+        </div>
+
+        <!-- Sécurité étendue -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="shield-check"></i> Sécurité (détails)</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-bedroom-lock"><span> Verrou chambre</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-safe"><span> Coffre-fort</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-exterior-camera"><span> Caméra extérieure</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-alarm"><span> Système d'alarme</span></label>
+          </div>
+          <div class="form-group">
+            <label for="emergency-numbers">Numéros d'urgence locaux</label>
+            <textarea id="emergency-numbers" rows="2" placeholder="Ex: Urgences 112, Police 17, SAMU 15, Pompiers 18, médecin garde Dr. Martin 04 XX XX XX"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="fire-escape">Issue de secours / évacuation</label>
+            <input type="text" id="fire-escape" placeholder="Ex: Sortie secours escalier B, point rassemblement parking">
+          </div>
+        </div>
+
+        <!-- <i data-lucide="baby"></i> Enfants & Bébés -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="baby"></i> Enfants & Bébés</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-baby-crib"><span> Lit bébé</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-baby-highchair"><span> Chaise haute</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-child-safe"><span> Protections sécurité enfants</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-toys"><span> Jouets</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-baby-bath"><span> Baignoire bébé</span></label>
+          </div>
+        </div>
+
+        <!-- Règles détaillées -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="scroll-text"></i> Règles de la maison</div>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="allows-pets"><span> Animaux acceptés</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="allows-smoking"><span> Fumeurs autorisés</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="allows-events"><span> Événements autorisés</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-shoes-off"><span> Chaussures à enlever</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-id-required"><span> Pièce d'identité requise</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="quiet-hours">Heures calmes</label>
+              <input type="text" id="quiet-hours" placeholder="Ex: 22h - 8h">
+            </div>
+            <div class="form-group">
+              <label for="age-minimum">Âge minimum</label>
+              <input type="text" id="age-minimum" placeholder="Ex: 18 ans">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="min-stay">Séjour minimum</label>
+              <input type="text" id="min-stay" placeholder="Ex: 2 nuits">
+            </div>
+            <div class="form-group">
+              <label for="max-stay">Séjour maximum</label>
+              <input type="text" id="max-stay" placeholder="Ex: 30 nuits">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cancellation-policy">Politique d'annulation</label>
+              <select id="cancellation-policy">
+                <option value="">--</option>
+                <option value="flexible">Flexible (remb. 24h avant)</option>
+                <option value="moderate">Modérée (remb. 5j avant)</option>
+                <option value="strict">Stricte (remb. 14j avant)</option>
+                <option value="super-strict">Très stricte (non rembours.)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="smoking-area">Zone fumeur (si autorisé)</label>
+              <input type="text" id="smoking-area" placeholder="Ex: Balcon uniquement">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="trash-instructions">Instructions poubelles / tri</label>
+            <textarea id="trash-instructions" rows="2" placeholder="Ex: Poubelle jaune = recyclage, grise = ordures. Sortir le mardi soir."></textarea>
+          </div>
+          <span class="checkbox-category" style="margin-top:12px;">Animaux (si acceptés)</span>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="pet-fee">Frais animaux</label>
+              <input type="text" id="pet-fee" placeholder="Ex: 25€/nuit/animal">
+            </div>
+            <div class="form-group">
+              <label for="pet-size-limit">Limite taille/poids</label>
+              <input type="text" id="pet-size-limit" placeholder="Ex: Max 15kg, petits chiens">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="pet-rules">Règles animaux</label>
+            <textarea id="pet-rules" rows="2" placeholder="Ex: Pas sur canapés/lits, jardin clôturé, gamelles fournies"></textarea>
+          </div>
+        </div>
+
+        <!-- � Tarifs, Caution & Paiements -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="wallet"></i> Tarifs, Caution & Paiements <span style="font-size:.75rem;font-weight:400;color:var(--clr-text-muted);">(questions très fréquentes des voyageurs)</span></div>
+
+          <span class="checkbox-category">Caution / Dépôt de garantie</span>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-deposit-required"><span> Caution obligatoire</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="deposit-amount">Montant de la caution</label>
+              <input type="text" id="deposit-amount" placeholder="Ex: 300€">
+            </div>
+            <div class="form-group">
+              <label for="deposit-method">Comment la caution est collectée</label>
+              <select id="deposit-method">
+                <option value="">--</option>
+                <option value="airbnb">Via Airbnb (automatique)</option>
+                <option value="card-hold">Empreinte carte bancaire</option>
+                <option value="cash">Espèces à l'arrivée</option>
+                <option value="bank-transfer">Virement bancaire</option>
+                <option value="cheque">Chèque de caution</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="deposit-refund-delay">Délai remboursement caution</label>
+              <select id="deposit-refund-delay">
+                <option value="">--</option>
+                <option value="checkout">Au départ (si aucun dégât)</option>
+                <option value="48h">Sous 48 heures</option>
+                <option value="7days">Sous 7 jours</option>
+                <option value="14days">Sous 14 jours</option>
+                <option value="30days">Sous 30 jours</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="deposit-covers">Que couvre la caution ?</label>
+              <input type="text" id="deposit-covers" placeholder="Ex: Dégâts, clés perdues, ménage excessif">
+            </div>
+          </div>
+            <div class="form-group">
+              <label for="security-deposit">Détails caution (texte libre)</label>
+              <input type="text" id="security-deposit" placeholder="Ex: 300€ par empreinte CB, remboursée sous 7j si aucun dégât">
+            </div>
+
+          <span class="checkbox-category" style="margin-top:16px;">Prix selon nombre de voyageurs</span>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-price-per-guest"><span> Le prix augmente si plus de voyageurs</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="extra-guest-threshold">À partir de combien de personnes</label>
+              <input type="text" id="extra-guest-threshold" placeholder="Ex: À partir du 3ème voyageur">
+            </div>
+            <div class="form-group">
+              <label for="extra-guest-fee">Supplément par voyageur</label>
+              <input type="text" id="extra-guest-fee" placeholder="Ex: 20€/nuit/personne">
+            </div>
+          </div>
+            <div class="form-group">
+              <label for="price-extra-guest-amount">Détails tarification voyageurs</label>
+              <input type="text" id="price-extra-guest-amount" placeholder="Ex: 2 pers. incluses, 25€/nuit par pers. supplémentaire, max 6">
+            </div>
+
+          <span class="checkbox-category" style="margin-top:16px;">Frais & Taxes</span>
+          <div class="checkbox-grid">
+            <label class="checkbox-item"><input type="checkbox" id="has-tourist-tax"><span> Taxe de séjour applicable</span></label>
+            <label class="checkbox-item"><input type="checkbox" id="has-cleaning-fee-included"><span> Frais de ménage inclus dans le prix</span></label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="tourist-tax-amount">Montant taxe de séjour</label>
+              <input type="text" id="tourist-tax-amount" placeholder="Ex: 1,50€/personne/nuit, enfants -18 ans exonérés">
+            </div>
+            <div class="form-group">
+              <label for="cleaning-fee">Frais de ménage</label>
+              <input type="text" id="cleaning-fee" placeholder="Ex: 50€ (inclus dans le prix affiché)">
+            </div>
+          </div>
+
+          <span class="checkbox-category" style="margin-top:16px;">Moyens de paiement (pour les extras sur place)</span>
+          <div class="form-group">
+            <label for="payment-extras-method">Paiement des extras accepté par</label>
+            <select id="payment-extras-method">
+              <option value="">--</option>
+              <option value="cash-only">Espèces uniquement</option>
+              <option value="card-only">Carte bancaire uniquement</option>
+              <option value="cash-card">Espèces ou Carte bancaire</option>
+              <option value="transfer">Virement bancaire</option>
+              <option value="all">Tous (espèces, CB, virement)</option>
+              <option value="airbnb-only">Uniquement via Airbnb</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="payment-notes">Notes paiement / tarification</label>
+            <textarea id="payment-notes" rows="2" placeholder="Ex: Linge de lit en supplément 15€. Bois de cheminée 10€/panier. Ménage fin de séjour obligatoire sinon 80€."></textarea>
+          </div>
+        </div>
+
+        <!-- �<i data-lucide="user"></i> Informations hôte -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="user"></i> Informations hôte</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="host-name">Nom / Prénom de l'hôte</label>
+              <input type="text" id="host-name" placeholder="Ex: Marie">
+            </div>
+            <div class="form-group">
+              <label for="host-languages">Langues parlées</label>
+              <input type="text" id="host-languages" placeholder="Ex: Français, Anglais, Espagnol">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="host-lives">Localisation hôte</label>
+              <select id="host-lives">
+                <option value="">--</option>
+                <option value="on-site">Sur place (même bâtiment)</option>
+                <option value="nearby">À proximité (&lt; 30 min)</option>
+                <option value="remote">À distance</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="host-response-time">Temps de réponse</label>
+              <input type="text" id="host-response-time" placeholder="Ex: Sous 1 heure en journée">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cohost-name">Co-hôte / Personne de contact</label>
+              <input type="text" id="cohost-name" placeholder="Ex: Pierre (gardien)">
+            </div>
+            <div class="form-group">
+              <label for="cohost-phone">Téléphone de contact</label>
+              <input type="text" id="cohost-phone" placeholder="Ex: 06 XX XX XX XX">
+            </div>
+          </div>
+        </div>
+
+        <!-- <i data-lucide="help-circle"></i> FAQ personnalisées -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="help-circle"></i> FAQ personnalisées <span style="font-size:.75rem;font-weight:400;color:var(--clr-text-muted);">(questions / réponses fréquentes de vos voyageurs)</span></div>
+          <div class="form-group">
+            <label for="custom-faq">Questions fréquentes & réponses</label>
+            <textarea id="custom-faq" rows="6" placeholder="Q: Comment fonctionne le chauffage ?
+R: Thermostat dans le couloir, tourner la molette.
+
+Q: Où faire les courses ?
+R: Carrefour City à 200m (ouvert 8h-22h), marché dimanche place de la Mairie.
+
+Q: Y a-t-il un bon restaurant italien ?
+R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
+            <span class="form-hint">Ajoutez autant de Q/R que vous voulez. L'IA utilisera ces réponses exactes quand un voyageur posera ces questions.</span>
+          </div>
+        </div>
+
+        <!-- <i data-lucide="file-text"></i> Description & Adresse -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="file-text"></i> Description & Adresse</div>
+          <div class="form-group">
+            <label for="address">Adresse complète</label>
+            <textarea id="address" rows="2" placeholder="Adresse complete du logement..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="description">Description du logement</label>
+            <textarea id="description" rows="3" placeholder="Décrivez votre logement, le quartier, les points forts, l'ambiance, ce qui le rend unique..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="house-rules">Règles supplémentaires (texte libre)</label>
+            <textarea id="house-rules" rows="3" placeholder="Ex: Merci de ne pas déplacer les meubles, ne pas utiliser les bougies, prévenir le voisin du dessous en cas de bruit..."></textarea>
+          </div>
+        </div>
+
+        <!-- Auto-réponse -->
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="bot"></i> Réponse automatique</div>
+          <div class="form-group">
+            <label class="checkbox-item" style="max-width:300px;">
+              <input type="checkbox" id="auto-reply-enabled">
+              <span>Activer la réponse automatique IA</span>
+            </label>
+            <span class="form-hint mt-2">Quand actif, l'IA répond automatiquement aux messages entrants.</span>
+          </div>
+          <div class="form-group">
+            <label for="reply-tone">Ton des réponses</label>
+            <select id="reply-tone">
+              <option value="professional">Professionnel</option>
+              <option value="friendly">Chaleureux / Amical</option>
+              <option value="concise">Court et concis</option>
+              <option value="luxe">Luxe / Premium</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="property-form-error" class="alert alert-error hidden" role="alert"></div>
+
+        <div style="display:flex;gap:12px;justify-content:flex-end;">
+          <button type="button" class="btn btn-outline" id="cancel-property-btn">Annuler</button>
+          <button type="submit" class="btn btn-primary" id="save-property-btn">
+            Enregistrer le logement
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nouvelle conversation -->
+<div id="new-conversation-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-conv-title">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-header">
+      <h2 id="modal-conv-title" class="card-title">Nouvelle Conversation</h2>
+      <button class="btn btn-ghost btn-icon" id="close-conversation-modal-btn" aria-label="Fermer">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="new-conversation-form" novalidate>
+        <div class="form-group">
+          <label for="conv-title">Titre / Nom du voyageur *</label>
+          <input type="text" id="conv-title" required placeholder="Ex: Jean Dupont - Juillet">
+        </div>
+        <div class="form-group">
+          <label for="conv-property">Propriété</label>
+          <select id="conv-property"><option value="">-- Choisir un logement --</option></select>
+        </div>
+        <div class="form-group">
+          <label for="conv-status">Statut</label>
+          <select id="conv-status">
+            <option value="inquiry">Demande d'information</option>
+            <option value="request">Demande de reservation</option>
+            <option value="confirmed">Confirmée</option>
+            <option value="checkedin">En cours</option>
+            <option value="checkedout">Terminée</option>
+          </select>
+        </div>
+        <div id="conv-form-error" class="alert alert-error hidden" role="alert"></div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;">
+          <button type="button" class="btn btn-outline" id="cancel-conversation-btn">Annuler</button>
+          <button type="submit" class="btn btn-primary">Créer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
+
+<!-- Mobile bottom navigation -->
+<nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Navigation mobile">
+  <div class="mobile-bottom-nav-inner">
+    <button class="bottom-nav-item active" onclick="showSection('properties');updateBottomNav(this)" data-section="properties">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Logements</span>
+    </button>
+    <button class="bottom-nav-item" onclick="showSection('conversations');updateBottomNav(this)" data-section="conversations">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span>Messages</span>
+      <span class="bottom-nav-badge" id="bottom-nav-conv-badge" style="display:none">0</span>
+    </button>
+    <a class="bottom-nav-item" href="/calendar.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Calendrier</span>
+    </a>
+    <button class="bottom-nav-item" onclick="showSection('settings');updateBottomNav(this)" data-section="settings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>Réglages</span>
+    </button>
+  </div>
+</nav>
+
+<script src="app.js"></script>
+<script>
+  // ---- Mobile sidebar toggle ----
+  function toggleSidebar() {
+    document.getElementById('dashboard-sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('open');
+  }
+  function closeSidebar() {
+    document.getElementById('dashboard-sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+  }
+
+  // ---- Auth check ----
+  checkAuth();
+  const _userEmail = localStorage.getItem('user_email') || '';
+  document.getElementById('user-email').textContent = _userEmail;
+  const _settingsEmail = document.getElementById('settings-user-email');
+  if (_settingsEmail) _settingsEmail.textContent = _userEmail;
+  const _avatarEl = document.getElementById('sidebar-avatar');
+  if (_avatarEl && _userEmail) _avatarEl.textContent = _userEmail[0].toUpperCase();
+  document.getElementById('logout-btn').addEventListener('click', logout);
+
+  let properties = [];
+  let conversations = [];
+  let editingPropertyId = null;
+  let isConversationsLoading = false;
+  let queuedConversationsReload = false;
+  let conversationsDebounceTimer = null;
+
+  function queueConversationsReload(delay = 180) {
+    if (conversationsDebounceTimer) clearTimeout(conversationsDebounceTimer);
+    conversationsDebounceTimer = setTimeout(() => {
+      conversationsDebounceTimer = null;
+      if (currentSection === 'conversations') {
+        loadConversations();
+      }
+    }, delay);
+  }
+
+  // ---- Section nav ----
+  function showSection(name) {
+    ['properties','conversations','integrations','settings'].forEach(s => {
+      document.getElementById('section-'+s).classList.toggle('hidden', s !== name);
+      const nav = document.getElementById('nav-'+s);
+      if (nav) {
+        nav.classList.toggle('active', s === name);
+        nav.setAttribute('aria-current', s === name ? 'page' : 'false');
+      }
+    });
+    if (name === 'conversations') loadConversations();
+    const heroTitle = document.getElementById('dashboard-hero-title');
+    if (heroTitle) {
+      const titles = {
+        properties: 'Pilotage des logements et automatisations',
+        conversations: 'Suivi des conversations en temps reel',
+        integrations: 'Integrations et connecteurs actifs',
+        settings: 'Paramètres du compte et préférences'
+      };
+      heroTitle.textContent = titles[name] || 'Pilotage des conversations voyageurs';
+    }
+    // Close sidebar on mobile after navigation
+    closeSidebar();
+  }
+
+  // ---- Bottom nav sync ----
+  function updateBottomNav(el) {
+    document.querySelectorAll('.bottom-nav-item').forEach(i => i.classList.remove('active'));
+    if (el) el.classList.add('active');
+  }
+  // Sync bottom nav badge with conv count
+  function syncBottomNavBadge(count) {
+    const badge = document.getElementById('bottom-nav-conv-badge');
+    if (badge) {
+      if (count > 0) { badge.textContent = count; badge.style.display = ''; }
+      else { badge.style.display = 'none'; }
+    }
+  }
+
+  // ---- Theme (dark/light) ----
+  function setTheme(mode) {
+    document.documentElement.setAttribute('data-theme', mode);
+    localStorage.setItem('hostai-theme', mode);
+    updateThemeButtons(mode);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+  function updateThemeButtons(mode) {
+    const lightBtn = document.getElementById('theme-light-btn');
+    const darkBtn = document.getElementById('theme-dark-btn');
+    if (lightBtn) {
+      lightBtn.classList.toggle('btn-primary', mode === 'light');
+      lightBtn.classList.toggle('btn-outline', mode !== 'light');
+    }
+    if (darkBtn) {
+      darkBtn.classList.toggle('btn-primary', mode === 'dark');
+      darkBtn.classList.toggle('btn-outline', mode !== 'dark');
+    }
+  }
+  // Apply saved theme on load
+  (function() {
+    const saved = localStorage.getItem('hostai-theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    // Update buttons once DOM is ready
+    setTimeout(() => updateThemeButtons(saved), 0);
+  })();
+
+  // ---- Load properties ----
+  async function loadProperties() {
+    try {
+      properties = await apiRequest('/api/properties');
+      document.getElementById('stat-properties').textContent = properties.length;
+      const heroProp = document.getElementById('hero-kpi-properties');
+      if (heroProp) heroProp.textContent = properties.length;
+      const autoReplies = properties.filter(p => p.auto_reply_enabled).length;
+      document.getElementById('stat-autoreplies').textContent = autoReplies;
+
+      document.getElementById('properties-loading').classList.add('hidden');
+      document.getElementById('properties-list').classList.remove('hidden');
+
+      if (properties.length === 0) {
+        document.getElementById('empty-properties').classList.remove('hidden');
+      } else {
+        document.getElementById('empty-properties').classList.add('hidden');
+        renderProperties();
+      }
+
+      // Rebuild conv property selector (clear first to avoid duplicates)
+      const sel = document.getElementById('conv-property');
+      sel.innerHTML = '<option value="">-- Choisir un logement --</option>';
+      properties.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+    } catch(e) {
+      document.getElementById('properties-loading').classList.add('hidden');
+      showError(e.message);
+    }
+  }
+
+  function renderProperties() {
+    const list = document.getElementById('properties-list');
+    list.innerHTML = properties.map(p => {
+      const amenities = [];
+      if (p.has_wifi) amenities.push('Wi-Fi');
+      if (p.has_kitchen) amenities.push('Cuisine');
+      if (p.has_parking) amenities.push('Parking');
+      if (p.has_pool) amenities.push('Piscine');
+      if (p.has_air_conditioning) amenities.push('Clim');
+      if (p.has_heating) amenities.push('Chauffage');
+      if (p.has_tv) amenities.push('TV');
+      if (p.has_netflix) amenities.push('Netflix');
+      if (p.has_bathtub) amenities.push('Baignoire');
+      if (p.has_washing_machine) amenities.push('Lave-linge');
+      if (p.has_dryer) amenities.push('Sèche-linge');
+      if (p.has_dishwasher) amenities.push('Lave-vaisselle');
+      if (p.has_refrigerator) amenities.push('Réfrigérateur');
+      if (p.has_coffee_maker) amenities.push('Machine à café');
+      if (p.has_bbq) amenities.push('Barbecue');
+      if (p.has_terrace) amenities.push('Terrasse');
+      if (p.has_garden) amenities.push('Jardin');
+      if (p.has_gym) amenities.push('Salle de sport');
+      if (p.has_fireplace) amenities.push('Cheminée');
+      if (p.has_smoke_detector) amenities.push('Dét. fumée');
+      if (p.has_carbon_monoxide_detector) amenities.push('Dét. CO');
+      if (p.has_workspace) amenities.push('Bureau');
+
+      return `
+        <article class="property-card" aria-label="Propriété : ${escapeHtml(p.name)}">
+          <div class="property-card-accent"></div>
+          <div class="property-card-body">
+            <div class="property-header">
+              <h3>${escapeHtml(p.name)}</h3>
+              <span class="property-type">${escapeHtml(p.property_type)}</span>
+            </div>
+            <div class="property-meta">
+              <span class="property-meta-item"><i data-lucide="bed-double"></i> ${p.bedrooms} ch.</span>
+              <span class="property-meta-item"><i data-lucide="bed-single"></i> ${p.beds} lits</span>
+              <span class="property-meta-item"><i data-lucide="bath"></i> ${p.bathrooms} SDB</span>
+              <span class="property-meta-item"><i data-lucide="users"></i> ${p.max_guests} max</span>
+            </div>
+            ${amenities.length ? `<div class="property-amenities">${amenities.map(a=>`<span class="amenity-tag">${a}</span>`).join('')}</div>` : ''}
+            <div class="auto-reply-toggle">
+              <label class="toggle-switch" aria-label="Réponse automatique pour ${escapeHtml(p.name)}">
+                <input type="checkbox" ${p.auto_reply_enabled ? 'checked' : ''} onchange="toggleAutoReply(${p.id}, this.checked)">
+                <span class="toggle-track"></span>
+              </label>
+              <span>Réponse auto ${p.auto_reply_enabled ? '<strong style="color:var(--clr-accent)">active</strong>' : 'inactive'}</span>
+            </div>
+            <div class="property-actions">
+              <button class="btn btn-sm btn-primary" onclick="openConversationsFor(${p.id})" aria-label="Voir les conversations de ${escapeHtml(p.name)}">Conversations</button>
+              <button class="btn btn-sm btn-outline" onclick="editProperty(${p.id})" aria-label="Modifier ${escapeHtml(p.name)}">Modifier</button>
+              <button class="btn btn-sm btn-ghost" onclick="deleteProperty(${p.id})" aria-label="Supprimer ${escapeHtml(p.name)}" style="color:var(--clr-danger)">Supprimer</button>
+            </div>
+          </div>
+        </article>`;
+    }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  // ---- Auto-reply toggle ----
+  async function toggleAutoReply(id, enabled) {
+    try {
+      await apiRequest('/api/properties/'+id, { method:'PUT', body:{ auto_reply_enabled: enabled } });
+      toast('success', enabled ? 'Réponse auto activée !' : 'Réponse auto désactivée.');
+      await loadProperties();
+    } catch(e) { toast('error', e.message); }
+  }
+
+  // ---- Delete property ----
+  async function deleteProperty(id) {
+    const prop = properties.find(p => p.id === id);
+    const name = prop ? prop.name : 'ce logement';
+    if (!confirm(`Supprimer "${name}" ? Cette action est irreversible.`)) return;
+    try {
+      await apiRequest('/api/properties/'+id, { method:'DELETE' });
+      toast('success','Propriété supprimée.');
+      await loadProperties();
+    } catch(e) { toast('error', e.message); }
+  }
+
+  // ---- Edit property ----
+  async function editProperty(id) {
+    const p = properties.find(prop => prop.id === id);
+    if (!p) return;
+    editingPropertyId = id;
+
+    // Charger les détails complets (inclut context_json avec infos pratiques)
+    let ctx = {};
+    try {
+      const full = await apiRequest('/api/properties/' + id);
+      try { ctx = JSON.parse(full.context_json || '{}'); } catch (_) {}
+    } catch (_) {}
+
+    document.getElementById('modal-prop-title').textContent = 'Modifier : ' + p.name;
+    document.getElementById('save-property-btn').textContent = 'Enregistrer les modifications';
+    // Basic fields
+    document.getElementById('property-name').value = p.name || '';
+    document.getElementById('property-type').value = p.property_type || '';
+    document.getElementById('bedrooms').value = p.bedrooms || 0;
+    document.getElementById('beds').value = p.beds || 0;
+    document.getElementById('bathrooms').value = p.bathrooms || 0;
+    document.getElementById('max-guests').value = p.max_guests || 1;
+    document.getElementById('address').value = p.address || '';
+    document.getElementById('description').value = p.description || '';
+    document.getElementById('house-rules').value = p.house_rules || '';
+    // Infos pratiques (depuis context_json)
+    document.getElementById('check-in-time').value  = ctx.check_in_time  || '';
+    document.getElementById('check-out-time').value = ctx.check_out_time || '';
+    document.getElementById('wifi-name').value      = ctx.wifi_name      || '';
+    document.getElementById('wifi-password').value  = ctx.wifi_password  || '';
+    document.getElementById('access-code').value    = ctx.access_code    || '';
+    document.getElementById('parking-info').value   = ctx.parking        || ctx.parking_info || '';
+    document.getElementById('early-checkin').value  = ctx.early_checkin  || '';
+    document.getElementById('late-checkout').value  = ctx.late_checkout  || '';
+    document.getElementById('nearby').value         = ctx.nearby         || '';
+    // Arrivée & Accès (context_json)
+    document.getElementById('checkin-method').value       = ctx.checkin_method       || '';
+    document.getElementById('key-location').value         = ctx.key_location         || '';
+    document.getElementById('gate-code').value            = ctx.gate_code            || '';
+    document.getElementById('building-entry').value       = ctx.building_entry       || '';
+    document.getElementById('floor-number').value         = ctx.floor_number         || '';
+    document.getElementById('has-elevator').checked       = !!ctx.has_elevator;
+    document.getElementById('luggage-storage').value      = ctx.luggage_storage      || '';
+    document.getElementById('checkout-instructions').value = ctx.checkout_instructions || '';
+    // WiFi étendu
+    document.getElementById('wifi-speed').value           = ctx.wifi_speed           || '';
+    document.getElementById('mobile-coverage').value      = ctx.mobile_coverage      || '';
+    document.getElementById('has-ethernet').checked       = !!ctx.has_ethernet;
+    // Transport
+    document.getElementById('neighborhood-name').value    = ctx.neighborhood_name    || '';
+    document.getElementById('distance-center').value      = ctx.distance_center      || '';
+    document.getElementById('distance-beach').value       = ctx.distance_beach       || '';
+    document.getElementById('distance-ski').value         = ctx.distance_ski         || '';
+    document.getElementById('nearest-airport').value      = ctx.nearest_airport      || '';
+    document.getElementById('airport-transfer').value     = ctx.airport_transfer     || '';
+    document.getElementById('nearest-train').value        = ctx.nearest_train        || '';
+    document.getElementById('nearest-metro-bus').value    = ctx.nearest_metro_bus    || '';
+    document.getElementById('parking-type').value         = ctx.parking_type         || '';
+    document.getElementById('paid-parking').value         = ctx.paid_parking         || '';
+    document.getElementById('has-taxi-uber').checked      = !!ctx.has_taxi_uber;
+    document.getElementById('has-ev-charging').checked    = !!ctx.has_ev_charging;
+    // Commerces
+    document.getElementById('nearest-supermarket').value  = ctx.nearest_supermarket  || '';
+    document.getElementById('nearest-bakery').value       = ctx.nearest_bakery       || '';
+    document.getElementById('nearest-restaurant').value   = ctx.nearest_restaurant   || '';
+    document.getElementById('nearest-pharmacy').value     = ctx.nearest_pharmacy     || '';
+    document.getElementById('nearest-hospital').value     = ctx.nearest_hospital     || '';
+    document.getElementById('nearest-atm').value          = ctx.nearest_atm          || '';
+    // Cuisine
+    document.getElementById('has-oven').checked           = !!ctx.has_oven;
+    document.getElementById('stove-type').value           = ctx.stove_type           || '';
+    document.getElementById('has-toaster').checked        = !!ctx.has_toaster;
+    document.getElementById('has-kettle').checked         = !!ctx.has_kettle;
+    document.getElementById('has-blender').checked        = !!ctx.has_blender;
+    document.getElementById('has-basic-condiments').checked = !!ctx.has_basic_condiments;
+    document.getElementById('has-breakfast').checked      = !!ctx.has_breakfast;
+    document.getElementById('kitchen-equipment-details').value = ctx.kitchen_equipment_details || '';
+    document.getElementById('drinking-water').value       = ctx.drinking_water       || '';
+    document.getElementById('breakfast-details').value    = ctx.breakfast_details    || '';
+    // Chambres
+    document.getElementById('bed-types').value            = ctx.bed_types            || '';
+    document.getElementById('has-extra-bed').checked      = !!ctx.has_extra_bed;
+    document.getElementById('extra-bed-fee').value        = ctx.extra_bed_fee        || '';
+    document.getElementById('has-blackout-curtains').checked = !!ctx.has_blackout_curtains;
+    document.getElementById('has-linen').checked          = !!ctx.has_linen;
+    document.getElementById('linen-change').value         = ctx.linen_change         || '';
+    document.getElementById('has-children-bed').checked   = !!ctx.has_children_bed;
+    // SDB
+    document.getElementById('has-toiletries').checked     = !!ctx.has_toiletries;
+    document.getElementById('has-towels').checked         = !!ctx.has_towels;
+    document.getElementById('has-bidet').checked          = !!ctx.has_bidet;
+    document.getElementById('shower-type').value          = ctx.shower_type          || '';
+    document.getElementById('hot-water-type').value       = ctx.hot_water_type       || '';
+    document.getElementById('hot-water-instructions').value = ctx.hot_water_instructions || '';
+    document.getElementById('towel-change').value         = ctx.towel_change         || '';
+    document.getElementById('second-bathroom-details').value = ctx.second_bathroom_details || '';
+    // Ménage
+    document.getElementById('has-cleaning-products').checked = !!ctx.has_cleaning_products;
+    document.getElementById('has-vacuum').checked         = !!ctx.has_vacuum;
+    document.getElementById('has-iron-board').checked     = !!ctx.has_iron_board;
+    document.getElementById('cleaning-fee').value         = ctx.cleaning_fee         || '';
+    document.getElementById('cleaning-frequency').value   = ctx.cleaning_frequency   || '';
+    document.getElementById('washing-instructions').value = ctx.washing_instructions || '';
+    document.getElementById('dryer-instructions').value   = ctx.dryer_instructions   || '';
+    // Extérieur
+    document.getElementById('has-pool-heated').checked    = !!ctx.has_pool_heated;
+    document.getElementById('has-jacuzzi').checked        = !!ctx.has_jacuzzi;
+    document.getElementById('has-beach-access').checked   = !!ctx.has_beach_access;
+    document.getElementById('has-beach-towels').checked   = !!ctx.has_beach_towels;
+    document.getElementById('has-outdoor-furniture').checked = !!ctx.has_outdoor_furniture;
+    document.getElementById('has-outdoor-dining').checked = !!ctx.has_outdoor_dining;
+    document.getElementById('has-private-entrance').checked = !!ctx.has_private_entrance;
+    document.getElementById('has-bike-storage').checked   = !!ctx.has_bike_storage;
+    document.getElementById('has-bikes').checked          = !!ctx.has_bikes;
+    document.getElementById('pool-type').value            = ctx.pool_type            || '';
+    document.getElementById('pool-hours').value           = ctx.pool_hours           || '';
+    document.getElementById('jacuzzi-availability').value = ctx.jacuzzi_availability || '';
+    document.getElementById('jacuzzi-notes').value        = ctx.jacuzzi_notes        || '';
+    document.getElementById('bikes-details').value        = ctx.bikes_details        || '';
+    document.getElementById('outdoor-other').value         = ctx.outdoor_other        || '';
+    // Divertissement
+    document.getElementById('has-game-console').checked   = !!ctx.has_game_console;
+    document.getElementById('has-board-games').checked    = !!ctx.has_board_games;
+    document.getElementById('has-books').checked          = !!ctx.has_books;
+    document.getElementById('has-sound-system').checked   = !!ctx.has_sound_system;
+    document.getElementById('has-projector').checked      = !!ctx.has_projector;
+    document.getElementById('has-smart-home').checked     = !!ctx.has_smart_home;
+    document.getElementById('cable-channels').value       = ctx.cable_channels       || '';
+    // Sécurité
+    document.getElementById('has-bedroom-lock').checked   = !!ctx.has_bedroom_lock;
+    document.getElementById('has-safe').checked           = !!ctx.has_safe;
+    document.getElementById('has-exterior-camera').checked = !!ctx.has_exterior_camera;
+    document.getElementById('has-alarm').checked          = !!ctx.has_alarm;
+    document.getElementById('emergency-numbers').value    = ctx.emergency_numbers    || '';
+    document.getElementById('fire-escape').value          = ctx.fire_escape          || '';
+    // Enfants
+    document.getElementById('has-baby-crib').checked      = !!ctx.has_baby_crib;
+    document.getElementById('has-baby-highchair').checked  = !!ctx.has_baby_highchair;
+    document.getElementById('has-child-safe').checked     = !!ctx.has_child_safe;
+    document.getElementById('has-toys').checked           = !!ctx.has_toys;
+    document.getElementById('has-baby-bath').checked      = !!ctx.has_baby_bath;
+    // Règles détaillées
+    document.getElementById('has-shoes-off').checked      = !!ctx.has_shoes_off;
+    document.getElementById('has-id-required').checked    = !!ctx.has_id_required;
+    document.getElementById('quiet-hours').value          = ctx.quiet_hours          || '';
+    document.getElementById('age-minimum').value          = ctx.age_minimum          || '';
+    document.getElementById('min-stay').value             = ctx.min_stay             || '';
+    document.getElementById('max-stay').value             = ctx.max_stay             || '';
+    document.getElementById('extra-guest-fee').value      = ctx.extra_guest_fee      || '';
+    document.getElementById('security-deposit').value     = ctx.security_deposit     || '';
+    document.getElementById('cancellation-policy').value  = ctx.cancellation_policy  || '';
+    document.getElementById('smoking-area').value         = ctx.smoking_area         || '';
+    document.getElementById('trash-instructions').value   = ctx.trash_instructions   || '';
+    document.getElementById('pet-fee').value              = ctx.pet_fee              || '';
+    document.getElementById('pet-size-limit').value       = ctx.pet_size_limit       || '';
+    document.getElementById('pet-rules').value            = ctx.pet_rules            || '';
+    // Tarifs, Caution & Paiements
+    document.getElementById('has-deposit-required').checked = !!ctx.has_deposit_required;
+    document.getElementById('deposit-amount').value        = ctx.deposit_amount       || '';
+    document.getElementById('deposit-method').value        = ctx.deposit_method       || '';
+    document.getElementById('deposit-refund-delay').value  = ctx.deposit_refund_delay || '';
+    document.getElementById('deposit-covers').value        = ctx.deposit_covers       || '';
+    document.getElementById('has-price-per-guest').checked  = !!ctx.has_price_per_guest;
+    document.getElementById('extra-guest-threshold').value  = ctx.extra_guest_threshold || '';
+    document.getElementById('price-extra-guest-amount').value = ctx.price_extra_guest_amount || '';
+    document.getElementById('has-tourist-tax').checked      = !!ctx.has_tourist_tax;
+    document.getElementById('tourist-tax-amount').value     = ctx.tourist_tax_amount   || '';
+    document.getElementById('has-cleaning-fee-included').checked = !!ctx.has_cleaning_fee_included;
+    document.getElementById('payment-extras-method').value  = ctx.payment_extras_method || '';
+    document.getElementById('payment-notes').value          = ctx.payment_notes        || '';
+    // Hôte
+    document.getElementById('host-name').value            = ctx.host_name            || '';
+    document.getElementById('host-languages').value       = ctx.host_languages       || '';
+    document.getElementById('host-lives').value           = ctx.host_lives           || '';
+    document.getElementById('host-response-time').value   = ctx.host_response_time   || '';
+    document.getElementById('cohost-name').value          = ctx.cohost_name          || '';
+    document.getElementById('cohost-phone').value         = ctx.cohost_phone         || '';
+    // FAQ
+    document.getElementById('custom-faq').value           = ctx.custom_faq           || '';
+    // Amenities
+    document.getElementById('has-wifi').checked = !!p.has_wifi;
+    document.getElementById('has-kitchen').checked = !!p.has_kitchen;
+    document.getElementById('has-parking').checked = !!p.has_parking;
+    document.getElementById('has-pool').checked = !!p.has_pool;
+    document.getElementById('has-gym').checked = !!p.has_gym;
+    document.getElementById('has-tv').checked = !!p.has_tv;
+    document.getElementById('has-washing-machine').checked = !!p.has_washing_machine;
+    document.getElementById('has-air-conditioning').checked = !!p.has_air_conditioning;
+    document.getElementById('has-heating').checked = !!p.has_heating;
+    document.getElementById('has-workspace').checked = !!p.has_workspace;
+    document.getElementById('has-hair-dryer').checked = !!p.has_hair_dryer;
+    document.getElementById('has-iron').checked = !!p.has_iron;
+    document.getElementById('has-bathtub').checked = !!p.has_bathtub;
+    document.getElementById('has-dryer').checked = !!p.has_dryer;
+    document.getElementById('has-dishwasher').checked = !!p.has_dishwasher;
+    document.getElementById('has-microwave').checked = !!p.has_microwave;
+    document.getElementById('has-refrigerator').checked = !!p.has_refrigerator;
+    document.getElementById('has-coffee-maker').checked = !!p.has_coffee_maker;
+    document.getElementById('has-smoke-detector').checked = !!p.has_smoke_detector;
+    document.getElementById('has-carbon-monoxide-detector').checked = !!p.has_carbon_monoxide_detector;
+    document.getElementById('has-fire-extinguisher').checked = !!p.has_fire_extinguisher;
+    document.getElementById('has-first-aid-kit').checked = !!p.has_first_aid_kit;
+    document.getElementById('has-bbq').checked = !!p.has_bbq;
+    document.getElementById('has-terrace').checked = !!p.has_terrace;
+    document.getElementById('has-garden').checked = !!p.has_garden;
+    document.getElementById('has-netflix').checked = !!p.has_netflix;
+    document.getElementById('has-fireplace').checked = !!p.has_fireplace;
+    // Rules
+    document.getElementById('allows-pets').checked = !!p.allows_pets;
+    document.getElementById('allows-smoking').checked = !!p.allows_smoking;
+    document.getElementById('allows-events').checked = !!p.allows_events;
+    // Auto-reply
+    document.getElementById('auto-reply-enabled').checked = !!p.auto_reply_enabled;
+    document.getElementById('reply-tone').value = p.reply_tone || 'professional';
+    // Open modal
+    document.getElementById('new-property-modal').classList.remove('hidden');
+    document.getElementById('property-name').focus();
+  }
+
+  // ---- Open conversations for a specific property ----
+  function openConversationsFor(propertyId) {
+    // Switch to conversations section (triggers loadConversations)
+    showSection('conversations');
+    // Pre-select this property in the new conversation modal and open it
+    // Use a small delay so the section is rendered before we focus
+    setTimeout(() => {
+      const sel = document.getElementById('conv-property');
+      if (sel) sel.value = propertyId;
+      document.getElementById('new-conversation-modal').classList.remove('hidden');
+      document.getElementById('conv-title').focus();
+    }, 80);
+  }
+
+  // ---- Load conversations ----
+  async function loadConversations() {
+    if (isConversationsLoading) {
+      queuedConversationsReload = true;
+      return;
+    }
+
+    isConversationsLoading = true;
+    document.getElementById('conversations-loading').classList.remove('hidden');
+    document.getElementById('conversations-list').classList.add('hidden');
+    try {
+      const data = await apiRequest('/api/conversations');
+      conversations = Array.isArray(data) ? data : (data.conversations || []);
+      document.getElementById('stat-conversations').textContent = conversations.length;
+      const heroConv = document.getElementById('hero-kpi-conversations');
+      if (heroConv) heroConv.textContent = conversations.length;
+      const totalMsgs = conversations.reduce((sum, c) => sum + (c.message_count || 0), 0);
+      document.getElementById('stat-messages').textContent = totalMsgs;
+      const heroMsg = document.getElementById('hero-kpi-messages');
+      if (heroMsg) heroMsg.textContent = totalMsgs;
+      const badge = document.getElementById('conv-count');
+      if (conversations.length > 0) { badge.textContent = conversations.length; badge.style.display = ''; }
+      syncBottomNavBadge(conversations.length);
+
+      document.getElementById('conversations-loading').classList.add('hidden');
+      document.getElementById('conversations-list').classList.remove('hidden');
+
+      if (conversations.length === 0) {
+        document.getElementById('empty-conversations').classList.remove('hidden');
+      } else {
+        document.getElementById('empty-conversations').classList.add('hidden');
+        renderConversations();
+      }
+    } catch(e) {
+      document.getElementById('conversations-loading').classList.add('hidden');
+      showError(e.message);
+    } finally {
+      isConversationsLoading = false;
+      if (queuedConversationsReload) {
+        queuedConversationsReload = false;
+        queueConversationsReload(120);
+      }
+    }
+  }
+
+  // ---- Property color palette (consistent per property ID) ----
+  const PROPERTY_COLORS = [
+    { color: '#6366F1', light: '#EEF2FF' },  // Indigo
+    { color: '#EC4899', light: '#FDF2F8' },  // Pink
+    { color: '#F59E0B', light: '#FFFBEB' },  // Amber
+    { color: '#10B981', light: '#ECFDF5' },  // Emerald
+    { color: '#3B82F6', light: '#EFF6FF' },  // Blue
+    { color: '#8B5CF6', light: '#F5F3FF' },  // Violet
+    { color: '#EF4444', light: '#FEF2F2' },  // Red
+    { color: '#14B8A6', light: '#F0FDFA' },  // Teal
+    { color: '#F97316', light: '#FFF7ED' },  // Orange
+    { color: '#06B6D4', light: '#ECFEFF' },  // Cyan
+  ];
+  function getPropertyColor(propertyId) {
+    if (!propertyId) return null;
+    return PROPERTY_COLORS[(propertyId - 1) % PROPERTY_COLORS.length];
+  }
+
+  function renderConversations() {
+    const statusLabels = {
+      inquiry:'Demande d\'info', request:'Demande de résa', confirmed:'Confirmée',
+      checkedin:'En séjour', checkedout:'Terminée'
+    };
+    const statusClass = {
+      inquiry:'badge-status-inquiry', request:'badge-status-request', confirmed:'badge-status-confirmed',
+      checkedin:'badge-status-checkedin', checkedout:'badge-status-checkedout'
+    };
+    const list = document.getElementById('conversations-list');
+    list.innerHTML = conversations.map(c => {
+      const initial = c.guest_name ? c.guest_name[0].toUpperCase() : (c.title ? c.title[0].toUpperCase() : '?');
+      const prop = c.property_id ? properties.find(p => p.id === c.property_id) : null;
+      const propName = prop ? prop.name : null;
+      const propColor = getPropertyColor(c.property_id);
+      const msgCount = c.message_count || 0;
+      const lastMsg = c.last_message ? (c.last_message.length > 80 ? c.last_message.substring(0, 80) + '…' : c.last_message) : '';
+
+      const colorStyle = propColor
+        ? `data-property-color style="--prop-color:${propColor.color};--prop-color-light:${propColor.light}"`
+        : '';
+      const avatarBg = propColor
+        ? `background:linear-gradient(135deg,${propColor.color},${propColor.color}dd)`
+        : '';
+      const propertyPill = propName
+        ? `<span class="conv-property-pill"><span class="conv-property-dot"></span>${escapeHtml(propName)}</span>`
+        : '';
+
+      // Unread: updated_at is newer than the last time this conversation was opened
+      const lastRead = parseInt(localStorage.getItem('conv_read_' + c.id) || '0', 10);
+      const updatedAt = c.updated_at ? new Date(c.updated_at).getTime() : 0;
+      const isUnread = updatedAt > lastRead;
+      const unreadClass = isUnread ? ' conv-unread' : '';
+      const unreadDot = isUnread ? '<span class="conv-unread-dot" title="Non lu" aria-label="Non lu"></span>' : '';
+
+      return `
+        <a href="/conversation.html?id=${c.id}" class="conversation-item${unreadClass}" ${colorStyle} aria-label="Ouvrir la conversation: ${escapeHtml(c.title)}">
+          <div class="conv-avatar" ${avatarBg ? `style="${avatarBg}"` : ''} aria-hidden="true">${initial}</div>
+          <div class="conv-info">
+            <h3>${escapeHtml(c.title)}</h3>
+            <p class="conversation-preview">${lastMsg ? escapeHtml(lastMsg) : '<span class="text-muted">Aucun message</span>'}</p>
+            <p class="conversation-meta">${propertyPill}${propName ? ' · ' : ''}${msgCount} msg · ${formatDate(c.updated_at)}</p>
+          </div>
+          <div class="conv-right">
+            <span class="badge ${statusClass[c.booking_status] || ''}">
+              ${statusLabels[c.booking_status] || c.booking_status}
+            </span>
+            ${unreadDot}
+          </div>
+        </a>`;
+    }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  // ---- Purge non-Airbnb conversations ----
+  async function purgeNonAirbnb() {
+    if (!confirm('Supprimer toutes les conversations non-Airbnb ?\nCette action est irréversible.')) return;
+    const btn = document.getElementById('purge-non-airbnb-btn');
+    btn.disabled = true;
+    btn.textContent = 'Suppression...';
+    try {
+      const data = await apiRequest('/api/gmail/purge-non-airbnb', { method: 'DELETE' });
+      showSuccess(`${data.deleted || 0} conversation(s) non-Airbnb supprimée(s)`);
+      loadConversations();
+    } catch (e) {
+      showError('Erreur purge : ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Purger non-Airbnb';
+    }
+  }
+
+  // ---- New Property modal ----
+  document.getElementById('new-property-btn').addEventListener('click', () => {
+    document.getElementById('new-property-modal').classList.remove('hidden');
+    document.getElementById('property-name').focus();
+  });
+  document.getElementById('close-property-modal-btn').addEventListener('click', closePropertyModal);
+  document.getElementById('cancel-property-btn').addEventListener('click', closePropertyModal);
+  document.getElementById('new-property-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closePropertyModal(); });
+
+  function closePropertyModal() {
+    document.getElementById('new-property-modal').classList.add('hidden');
+    document.getElementById('new-property-form').reset();
+    document.getElementById('property-form-error').classList.add('hidden');
+    // Reset edit mode
+    editingPropertyId = null;
+    document.getElementById('modal-prop-title').textContent = 'Ajouter une propriété';
+    document.getElementById('save-property-btn').textContent = 'Enregistrer le logement';
+  }
+
+  document.getElementById('new-property-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errDiv = document.getElementById('property-form-error');
+    errDiv.classList.add('hidden');
+    const btn = document.getElementById('save-property-btn');
+    btn.disabled = true; btn.textContent = 'Enregistrement...';
+    const wasEditing = !!editingPropertyId;
+
+    try {
+      const method = wasEditing ? 'PUT' : 'POST';
+      const endpoint = wasEditing ? '/api/properties/' + editingPropertyId : '/api/properties';
+      await apiRequest(endpoint, { method, body: {
+        name: document.getElementById('property-name').value,
+        property_type: document.getElementById('property-type').value,
+        bedrooms: +document.getElementById('bedrooms').value,
+        beds: +document.getElementById('beds').value,
+        bathrooms: +document.getElementById('bathrooms').value,
+        max_guests: +document.getElementById('max-guests').value,
+        // Arrivée & Accès
+        check_in_time:  document.getElementById('check-in-time').value,
+        check_out_time: document.getElementById('check-out-time').value,
+        checkin_method:  document.getElementById('checkin-method').value,
+        key_location:    document.getElementById('key-location').value,
+        access_code:     document.getElementById('access-code').value,
+        gate_code:       document.getElementById('gate-code').value,
+        building_entry:  document.getElementById('building-entry').value,
+        floor_number:    document.getElementById('floor-number').value,
+        has_elevator:    document.getElementById('has-elevator').checked,
+        luggage_storage: document.getElementById('luggage-storage').value,
+        early_checkin:   document.getElementById('early-checkin').value,
+        late_checkout:   document.getElementById('late-checkout').value,
+        checkout_instructions: document.getElementById('checkout-instructions').value,
+        // WiFi
+        wifi_name:       document.getElementById('wifi-name').value,
+        wifi_password:   document.getElementById('wifi-password').value,
+        wifi_speed:      document.getElementById('wifi-speed').value,
+        mobile_coverage: document.getElementById('mobile-coverage').value,
+        has_ethernet:    document.getElementById('has-ethernet').checked,
+        // Transport
+        neighborhood_name: document.getElementById('neighborhood-name').value,
+        distance_center:   document.getElementById('distance-center').value,
+        distance_beach:    document.getElementById('distance-beach').value,
+        distance_ski:      document.getElementById('distance-ski').value,
+        nearest_airport:   document.getElementById('nearest-airport').value,
+        airport_transfer:  document.getElementById('airport-transfer').value,
+        nearest_train:     document.getElementById('nearest-train').value,
+        nearest_metro_bus: document.getElementById('nearest-metro-bus').value,
+        parking_info:      document.getElementById('parking-info').value,
+        parking_type:      document.getElementById('parking-type').value,
+        paid_parking:      document.getElementById('paid-parking').value,
+        has_taxi_uber:     document.getElementById('has-taxi-uber').checked,
+        has_ev_charging:   document.getElementById('has-ev-charging').checked,
+        nearby:            document.getElementById('nearby').value,
+        // Commerces
+        nearest_supermarket: document.getElementById('nearest-supermarket').value,
+        nearest_bakery:      document.getElementById('nearest-bakery').value,
+        nearest_restaurant:  document.getElementById('nearest-restaurant').value,
+        nearest_pharmacy:    document.getElementById('nearest-pharmacy').value,
+        nearest_hospital:    document.getElementById('nearest-hospital').value,
+        nearest_atm:         document.getElementById('nearest-atm').value,
+        // Équipements (DB columns)
+        has_wifi: document.getElementById('has-wifi').checked,
+        has_kitchen: document.getElementById('has-kitchen').checked,
+        has_parking: document.getElementById('has-parking').checked,
+        has_pool: document.getElementById('has-pool').checked,
+        has_gym: document.getElementById('has-gym').checked,
+        has_tv: document.getElementById('has-tv').checked,
+        has_washing_machine: document.getElementById('has-washing-machine').checked,
+        has_air_conditioning: document.getElementById('has-air-conditioning').checked,
+        has_heating: document.getElementById('has-heating').checked,
+        has_workspace: document.getElementById('has-workspace').checked,
+        has_hair_dryer: document.getElementById('has-hair-dryer').checked,
+        has_iron: document.getElementById('has-iron').checked,
+        has_bathtub: document.getElementById('has-bathtub').checked,
+        has_dryer: document.getElementById('has-dryer').checked,
+        has_dishwasher: document.getElementById('has-dishwasher').checked,
+        has_microwave: document.getElementById('has-microwave').checked,
+        has_refrigerator: document.getElementById('has-refrigerator').checked,
+        has_coffee_maker: document.getElementById('has-coffee-maker').checked,
+        has_smoke_detector: document.getElementById('has-smoke-detector').checked,
+        has_carbon_monoxide_detector: document.getElementById('has-carbon-monoxide-detector').checked,
+        has_fire_extinguisher: document.getElementById('has-fire-extinguisher').checked,
+        has_first_aid_kit: document.getElementById('has-first-aid-kit').checked,
+        has_bbq: document.getElementById('has-bbq').checked,
+        has_terrace: document.getElementById('has-terrace').checked,
+        has_garden: document.getElementById('has-garden').checked,
+        has_netflix: document.getElementById('has-netflix').checked,
+        has_fireplace: document.getElementById('has-fireplace').checked,
+        // Cuisine détaillée
+        has_oven: document.getElementById('has-oven').checked,
+        stove_type: document.getElementById('stove-type').value,
+        has_toaster: document.getElementById('has-toaster').checked,
+        has_kettle: document.getElementById('has-kettle').checked,
+        has_blender: document.getElementById('has-blender').checked,
+        has_basic_condiments: document.getElementById('has-basic-condiments').checked,
+        has_breakfast: document.getElementById('has-breakfast').checked,
+        kitchen_equipment_details: document.getElementById('kitchen-equipment-details').value,
+        drinking_water: document.getElementById('drinking-water').value,
+        breakfast_details: document.getElementById('breakfast-details').value,
+        // Chambres
+        bed_types: document.getElementById('bed-types').value,
+        has_extra_bed: document.getElementById('has-extra-bed').checked,
+        extra_bed_fee: document.getElementById('extra-bed-fee').value,
+        has_blackout_curtains: document.getElementById('has-blackout-curtains').checked,
+        has_linen: document.getElementById('has-linen').checked,
+        linen_change: document.getElementById('linen-change').value,
+        has_children_bed: document.getElementById('has-children-bed').checked,
+        // SDB
+        has_toiletries: document.getElementById('has-toiletries').checked,
+        has_towels: document.getElementById('has-towels').checked,
+        has_bidet: document.getElementById('has-bidet').checked,
+        shower_type: document.getElementById('shower-type').value,
+        hot_water_type: document.getElementById('hot-water-type').value,
+        hot_water_instructions: document.getElementById('hot-water-instructions').value,
+        towel_change: document.getElementById('towel-change').value,
+        second_bathroom_details: document.getElementById('second-bathroom-details').value,
+        // Ménage
+        has_cleaning_products: document.getElementById('has-cleaning-products').checked,
+        has_vacuum: document.getElementById('has-vacuum').checked,
+        has_iron_board: document.getElementById('has-iron-board').checked,
+        cleaning_fee: document.getElementById('cleaning-fee').value,
+        cleaning_frequency: document.getElementById('cleaning-frequency').value,
+        washing_instructions: document.getElementById('washing-instructions').value,
+        dryer_instructions: document.getElementById('dryer-instructions').value,
+        // Extérieur détaillé
+        has_pool_heated: document.getElementById('has-pool-heated').checked,
+        has_jacuzzi: document.getElementById('has-jacuzzi').checked,
+        has_beach_access: document.getElementById('has-beach-access').checked,
+        has_beach_towels: document.getElementById('has-beach-towels').checked,
+        has_outdoor_furniture: document.getElementById('has-outdoor-furniture').checked,
+        has_outdoor_dining: document.getElementById('has-outdoor-dining').checked,
+        has_private_entrance: document.getElementById('has-private-entrance').checked,
+        has_bike_storage: document.getElementById('has-bike-storage').checked,
+        has_bikes: document.getElementById('has-bikes').checked,
+        pool_type: document.getElementById('pool-type').value,
+        pool_hours: document.getElementById('pool-hours').value,
+        jacuzzi_availability: document.getElementById('jacuzzi-availability').value,
+        jacuzzi_notes: document.getElementById('jacuzzi-notes').value,
+        bikes_details: document.getElementById('bikes-details').value,
+        outdoor_other: document.getElementById('outdoor-other').value,
+        // Divertissement
+        has_game_console: document.getElementById('has-game-console').checked,
+        has_board_games: document.getElementById('has-board-games').checked,
+        has_books: document.getElementById('has-books').checked,
+        has_sound_system: document.getElementById('has-sound-system').checked,
+        has_projector: document.getElementById('has-projector').checked,
+        has_smart_home: document.getElementById('has-smart-home').checked,
+        cable_channels: document.getElementById('cable-channels').value,
+        // Sécurité
+        has_bedroom_lock: document.getElementById('has-bedroom-lock').checked,
+        has_safe: document.getElementById('has-safe').checked,
+        has_exterior_camera: document.getElementById('has-exterior-camera').checked,
+        has_alarm: document.getElementById('has-alarm').checked,
+        emergency_numbers: document.getElementById('emergency-numbers').value,
+        fire_escape: document.getElementById('fire-escape').value,
+        // Enfants
+        has_baby_crib: document.getElementById('has-baby-crib').checked,
+        has_baby_highchair: document.getElementById('has-baby-highchair').checked,
+        has_child_safe: document.getElementById('has-child-safe').checked,
+        has_toys: document.getElementById('has-toys').checked,
+        has_baby_bath: document.getElementById('has-baby-bath').checked,
+        // Règles
+        allows_pets: document.getElementById('allows-pets').checked,
+        allows_smoking: document.getElementById('allows-smoking').checked,
+        allows_events: document.getElementById('allows-events').checked,
+        has_shoes_off: document.getElementById('has-shoes-off').checked,
+        has_id_required: document.getElementById('has-id-required').checked,
+        quiet_hours: document.getElementById('quiet-hours').value,
+        age_minimum: document.getElementById('age-minimum').value,
+        min_stay: document.getElementById('min-stay').value,
+        max_stay: document.getElementById('max-stay').value,
+        extra_guest_fee: document.getElementById('extra-guest-fee').value,
+        security_deposit: document.getElementById('security-deposit').value,
+        cancellation_policy: document.getElementById('cancellation-policy').value,
+        smoking_area: document.getElementById('smoking-area').value,
+        trash_instructions: document.getElementById('trash-instructions').value,
+        pet_fee: document.getElementById('pet-fee').value,
+        pet_size_limit: document.getElementById('pet-size-limit').value,
+        pet_rules: document.getElementById('pet-rules').value,
+        // Tarifs, Caution & Paiements
+        has_deposit_required: document.getElementById('has-deposit-required').checked,
+        deposit_amount: document.getElementById('deposit-amount').value,
+        deposit_method: document.getElementById('deposit-method').value,
+        deposit_refund_delay: document.getElementById('deposit-refund-delay').value,
+        deposit_covers: document.getElementById('deposit-covers').value,
+        has_price_per_guest: document.getElementById('has-price-per-guest').checked,
+        extra_guest_threshold: document.getElementById('extra-guest-threshold').value,
+        price_extra_guest_amount: document.getElementById('price-extra-guest-amount').value,
+        has_tourist_tax: document.getElementById('has-tourist-tax').checked,
+        tourist_tax_amount: document.getElementById('tourist-tax-amount').value,
+        has_cleaning_fee_included: document.getElementById('has-cleaning-fee-included').checked,
+        payment_extras_method: document.getElementById('payment-extras-method').value,
+        payment_notes: document.getElementById('payment-notes').value,
+        // Hôte
+        host_name: document.getElementById('host-name').value,
+        host_languages: document.getElementById('host-languages').value,
+        host_lives: document.getElementById('host-lives').value,
+        host_response_time: document.getElementById('host-response-time').value,
+        cohost_name: document.getElementById('cohost-name').value,
+        cohost_phone: document.getElementById('cohost-phone').value,
+        // FAQ
+        custom_faq: document.getElementById('custom-faq').value,
+        // Description
+        address: document.getElementById('address').value,
+        description: document.getElementById('description').value,
+        house_rules: document.getElementById('house-rules').value,
+        auto_reply_enabled: document.getElementById('auto-reply-enabled').checked,
+        reply_tone: document.getElementById('reply-tone').value
+      }});
+      closePropertyModal();
+      toast('success', wasEditing ? 'Modifications enregistrées !' : 'Logement enregistré !');
+      await loadProperties();
+    } catch(e) {
+      errDiv.textContent = e.message;
+      errDiv.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = wasEditing ? 'Enregistrer les modifications' : 'Enregistrer le logement';
+    }
+  });
+
+  // ---- New Conversation modal ----
+  document.getElementById('new-conversation-btn').addEventListener('click', () => {
+    document.getElementById('new-conversation-modal').classList.remove('hidden');
+    document.getElementById('conv-title').focus();
+  });
+  document.getElementById('close-conversation-modal-btn').addEventListener('click', closeConvModal);
+  document.getElementById('cancel-conversation-btn').addEventListener('click', closeConvModal);
+  document.getElementById('new-conversation-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeConvModal(); });
+
+  function closeConvModal() {
+    document.getElementById('new-conversation-modal').classList.add('hidden');
+    document.getElementById('new-conversation-form').reset();
+  }
+
+  document.getElementById('new-conversation-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errDiv = document.getElementById('conv-form-error');
+    errDiv.classList.add('hidden');
+    const title = document.getElementById('conv-title').value.trim();
+    if (!title) { errDiv.textContent = 'Titre obligatoire'; errDiv.classList.remove('hidden'); return; }
+    try {
+      const result = await apiRequest('/api/conversations', { method:'POST', body: {
+        title,
+        property_id: document.getElementById('conv-property').value || null,
+        booking_status: document.getElementById('conv-status').value
+      }});
+      closeConvModal();
+      toast('success','Conversation créée !');
+      window.location.href = '/conversation.html?id=' + result.conversation.id;
+    } catch(e) { errDiv.textContent = e.message; errDiv.classList.remove('hidden'); }
+  });
+
+  // ---- Airbnb Import ----
+  let importedData = null;
+
+  document.getElementById('import-airbnb-btn').addEventListener('click', () => {
+    document.getElementById('import-airbnb-modal').classList.remove('hidden');
+    document.getElementById('airbnb-url-input').focus();
+  });
+  document.getElementById('close-import-modal-btn').addEventListener('click', closeImportModal);
+  document.getElementById('import-airbnb-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeImportModal();
+  });
+  document.getElementById('airbnb-url-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') fetchAirbnbListing();
+  });
+
+  function closeImportModal() {
+    document.getElementById('import-airbnb-modal').classList.add('hidden');
+    resetImportModal();
+    importedData = null;
+  }
+  function resetImportModal() {
+    document.getElementById('import-step-url').classList.remove('hidden');
+    document.getElementById('import-step-preview').classList.add('hidden');
+    document.getElementById('import-step-grid').classList.add('hidden');
+    document.getElementById('import-error').classList.add('hidden');
+    document.getElementById('import-fetch-btn').disabled = false;
+    document.getElementById('import-fetch-label').textContent = 'Continuer →';
+  }
+
+  // Detect if URL is a host profile or a single listing
+  function isProfileUrl(url) {
+    return /\/users?\/show\//i.test(url) || /\/host-home/i.test(url);
+  }
+
+  async function fetchAirbnbListing() {
+    const url = document.getElementById('airbnb-url-input').value.trim();
+    if (!url) {
+      const errDiv = document.getElementById('import-error');
+      errDiv.textContent = 'Veuillez entrer une URL Airbnb.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+    document.getElementById('import-error').classList.add('hidden');
+    const btn = document.getElementById('import-fetch-btn');
+    const label = document.getElementById('import-fetch-label');
+    btn.disabled = true;
+    label.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Recherche en cours…';
+
+    try {
+      if (isProfileUrl(url)) {
+        // === Mode profil : lister tous les logements ===
+        const result = await apiRequest('/api/properties/scan-airbnb-profile', { method: 'POST', body: { profileUrl: url } });
+        renderListingGrid(result.listings);
+        document.getElementById('import-step-url').classList.add('hidden');
+        document.getElementById('import-step-grid').classList.remove('hidden');
+        document.getElementById('import-grid-header').innerHTML =
+          '<strong>' + result.total + ' logement' + (result.total > 1 ? 's' : '') + ' trouvé' + (result.total > 1 ? 's' : '') + '</strong>' +
+          ' — cliquez sur Importer pour ajouter un logement à votre site.';
+      } else {
+        // === Mode logement unique ===
+        const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url } });
+        importedData = result.data;
+        renderImportPreview(result.data, result.warning);
+        document.getElementById('import-step-url').classList.add('hidden');
+        document.getElementById('import-step-preview').classList.remove('hidden');
+        if (result.warning) {
+          const w = document.getElementById('import-warning');
+          w.textContent = result.warning;
+          w.classList.remove('hidden');
+        }
+      }
+    } catch(err) {
+      const errDiv = document.getElementById('import-error');
+      errDiv.textContent = err.message || 'Erreur lors de la recherche.';
+      errDiv.classList.remove('hidden');
+      btn.disabled = false;
+      label.textContent = 'Continuer →';
+    }
+  }
+
+  // Render the listing grid for profile scan results
+  function renderListingGrid(listings) {
+    document.getElementById('profile-listing-grid').innerHTML = listings.map(l => {
+      const name = l.name || ('Logement #' + l.id);
+      return `<div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 12px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;">
+        <div style="font-size:.82rem;font-weight:600;color:var(--clr-text);line-height:1.3;">${escapeHtml(name)}</div>
+        <div style="font-size:.72rem;color:var(--clr-text-muted);">#${l.id}</div>
+        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:auto;" onclick="importSingleListing('${l.id}', this)">Importer</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Import a single listing from the grid (direct create, no preview)
+  async function importSingleListing(listingId, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;vertical-align:middle;"></span>';
+    try {
+      const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url: listingId } });
+      const d = result.data;
+      await apiRequest('/api/properties', {
+        method: 'POST',
+        body: {
+          name: d.name, property_type: d.property_type,
+          bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
+          address: d.address || '', description: d.description || '', house_rules: d.house_rules || '',
+          check_in_time: d.check_in_time || '', check_out_time: d.check_out_time || '', nearby: d.nearby || '',
+          has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
+          has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
+          has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning,
+          has_heating: d.has_heating, has_workspace: d.has_workspace,
+          has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron,
+          has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
+          has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave,
+          has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
+          has_smoke_detector: d.has_smoke_detector, has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
+          has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
+          has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden,
+          has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
+          allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
+          airbnb_listing_id: d.airbnb_listing_id, auto_reply_enabled: false, reply_tone: 'friendly'
+        }
+      });
+      btn.textContent = '✓ Importé';
+      btn.style.background = 'var(--clr-accent)';
+      btn.style.borderColor = 'var(--clr-accent)';
+      await loadProperties();
+      toast('success', '' + d.name + ' importé !');
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = 'Réessayer';
+      toast('error', err.message || "Erreur lors de l'importation.");
+    }
+  }
+
+  function renderImportPreview(d, warning) {
+    const yesNo = val => val ? '<span style="color:var(--clr-accent)">✓</span>' : '<span style="color:var(--clr-text-light)">–</span>';
+    const confidence = { high: 'Données complètes', low: 'Données partielles', none: 'À compléter manuellement' };
+    const confBadge = confidence[d._confidence || 'none'];
+    const typeLabels = { apartment:'Appartement', house:'Maison', villa:'Villa', studio:'Studio', loft:'Loft', chalet:'Chalet' };
+    const truncate = (str, n) => str && str.length > n ? str.slice(0, n) + '…' : str || '';
+    document.getElementById('import-preview-card').innerHTML = `
+      <div class="import-preview-header">
+        <div>
+          <div class="import-preview-title">${escapeHtml(d.name)}</div>
+          <div class="import-preview-meta">
+            <span style="font-size:.78rem;color:var(--clr-text-muted);">${typeLabels[d.property_type]||d.property_type}</span>
+            · <span style="font-size:.78rem;color:var(--clr-text-muted);">ID ${d.airbnb_listing_id}</span>
+            · <span style="font-size:.78rem;">${confBadge}</span>
+          </div>
+        </div>
+      </div>
+      <div class="import-preview-stats">
+        <div class="import-stat"><span class="import-stat-val">${d.bedrooms}</span><span class="import-stat-lbl">Chambres</span></div>
+        <div class="import-stat"><span class="import-stat-val">${d.beds}</span><span class="import-stat-lbl">Lits</span></div>
+        <div class="import-stat"><span class="import-stat-val">${d.bathrooms}</span><span class="import-stat-lbl">SDB</span></div>
+        <div class="import-stat"><span class="import-stat-val">${d.max_guests}</span><span class="import-stat-lbl">Voyageurs</span></div>
+      </div>
+      <div class="import-preview-amenities">
+        <span>Wi-Fi ${yesNo(d.has_wifi)}</span>
+        <span>Cuisine ${yesNo(d.has_kitchen)}</span>
+        <span>Parking ${yesNo(d.has_parking)}</span>
+        <span>Piscine ${yesNo(d.has_pool)}</span>
+        <span>Clim ${yesNo(d.has_air_conditioning)}</span>
+        <span>Chauffage ${yesNo(d.has_heating)}</span>
+        <span>TV ${yesNo(d.has_tv)}</span>
+        <span>Netflix ${yesNo(d.has_netflix)}</span>
+        <span>Cheminée ${yesNo(d.has_fireplace)}</span>
+        <span>Baignoire ${yesNo(d.has_bathtub)}</span>
+        <span>Sèche-chev. ${yesNo(d.has_hair_dryer)}</span>
+        <span>Lave-linge ${yesNo(d.has_washing_machine)}</span>
+        <span>Sèche-linge ${yesNo(d.has_dryer)}</span>
+        <span>Lave-vaisselle ${yesNo(d.has_dishwasher)}</span>
+        <span>Réfrigérateur ${yesNo(d.has_refrigerator)}</span>
+        <span>Machine café ${yesNo(d.has_coffee_maker)}</span>
+        <span>Barbecue ${yesNo(d.has_bbq)}</span>
+        <span>Terrasse ${yesNo(d.has_terrace)}</span>
+        <span>Jardin ${yesNo(d.has_garden)}</span>
+        <span>Salle sport ${yesNo(d.has_gym)}</span>
+        <span>Dét. fumée ${yesNo(d.has_smoke_detector)}</span>
+        <span>Dét. CO ${yesNo(d.has_carbon_monoxide_detector)}</span>
+        <span>Extincteur ${yesNo(d.has_fire_extinguisher)}</span>
+        <span>Trousse ${yesNo(d.has_first_aid_kit)}</span>
+        <span>Animaux ${yesNo(d.allows_pets)}</span>
+        <span>Fumeurs ${yesNo(d.allows_smoking)}</span>
+      </div>
+      ${d.address ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:10px;">${escapeHtml(d.address)}</div>` : ''}
+      ${d.description ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;border-top:1px solid var(--clr-border);padding-top:8px;"><strong style="color:var(--clr-text);">Description :</strong> ${escapeHtml(truncate(d.description, 200))}</div>` : ''}
+      ${d.house_rules ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;"><strong style="color:var(--clr-text);">Règles :</strong> ${escapeHtml(truncate(d.house_rules, 180))}</div>` : ''}
+    `;
+  }
+
+  function _prefillPropertyForm(d) {
+    const sf = (id, val) => { const el = document.getElementById(id); if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) el.value = val !== undefined && val !== null ? val : el.value; };
+    const sc = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+    sf('property-name', d.name);
+    sf('property-type', d.property_type);
+    sf('bedrooms', d.bedrooms);
+    sf('beds', d.beds);
+    sf('bathrooms', d.bathrooms);
+    sf('max-guests', d.max_guests);
+    sf('address', d.address);
+    sf('description', d.description);
+    sf('house-rules', d.house_rules);
+    // Infos pratiques importées depuis Airbnb
+    sf('check-in-time',  d.check_in_time);
+    sf('check-out-time', d.check_out_time);
+    sf('nearby',         d.nearby);
+    sc('has-wifi', d.has_wifi); sc('has-kitchen', d.has_kitchen);
+    sc('has-parking', d.has_parking); sc('has-pool', d.has_pool);
+    sc('has-gym', d.has_gym); sc('has-tv', d.has_tv);
+    sc('has-washing-machine', d.has_washing_machine); sc('has-air-conditioning', d.has_air_conditioning);
+    sc('has-heating', d.has_heating); sc('has-workspace', d.has_workspace);
+    sc('has-hair-dryer', d.has_hair_dryer); sc('has-iron', d.has_iron);
+    sc('has-bathtub', d.has_bathtub); sc('has-dryer', d.has_dryer);
+    sc('has-dishwasher', d.has_dishwasher); sc('has-microwave', d.has_microwave);
+    sc('has-refrigerator', d.has_refrigerator); sc('has-coffee-maker', d.has_coffee_maker);
+    sc('has-smoke-detector', d.has_smoke_detector); sc('has-carbon-monoxide-detector', d.has_carbon_monoxide_detector);
+    sc('has-fire-extinguisher', d.has_fire_extinguisher); sc('has-first-aid-kit', d.has_first_aid_kit);
+    sc('has-bbq', d.has_bbq); sc('has-terrace', d.has_terrace); sc('has-garden', d.has_garden);
+    sc('has-netflix', d.has_netflix); sc('has-fireplace', d.has_fireplace);
+    sc('allows-pets', d.allows_pets); sc('allows-smoking', d.allows_smoking);
+    sc('allows-events', d.allows_events);
+  }
+
+  // Direct import — creates the property immediately, no second form needed
+  async function confirmImport() {
+    if (!importedData) return;
+    const btn = document.getElementById('confirm-import-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span> Importation...';
+
+    const d = importedData;
+    try {
+      await apiRequest('/api/properties', {
+        method: 'POST',
+        body: {
+          name:             d.name,
+          property_type:    d.property_type,
+          bedrooms:         d.bedrooms,
+          beds:             d.beds,
+          bathrooms:        d.bathrooms,
+          max_guests:       d.max_guests,
+          address:          d.address         || '',
+          description:      d.description     || '',
+          house_rules:      d.house_rules     || '',
+          // Infos pratiques récupérées depuis Airbnb
+          check_in_time:    d.check_in_time   || '',
+          check_out_time:   d.check_out_time  || '',
+          nearby:           d.nearby          || '',
+          has_wifi:             d.has_wifi,
+          has_kitchen:          d.has_kitchen,
+          has_parking:          d.has_parking,
+          has_pool:             d.has_pool,
+          has_gym:              d.has_gym,
+          has_tv:               d.has_tv,
+          has_washing_machine:  d.has_washing_machine,
+          has_air_conditioning: d.has_air_conditioning,
+          has_heating:          d.has_heating,
+          has_workspace:        d.has_workspace,
+          has_hair_dryer:       d.has_hair_dryer,
+          has_iron:             d.has_iron,
+          has_bathtub:          d.has_bathtub,
+          has_dryer:            d.has_dryer,
+          has_dishwasher:       d.has_dishwasher,
+          has_microwave:        d.has_microwave,
+          has_refrigerator:     d.has_refrigerator,
+          has_coffee_maker:     d.has_coffee_maker,
+          has_smoke_detector:   d.has_smoke_detector,
+          has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
+          has_fire_extinguisher: d.has_fire_extinguisher,
+          has_first_aid_kit:    d.has_first_aid_kit,
+          has_bbq:              d.has_bbq,
+          has_terrace:          d.has_terrace,
+          has_garden:           d.has_garden,
+          has_netflix:          d.has_netflix,
+          has_fireplace:        d.has_fireplace,
+          allows_pets:          d.allows_pets,
+          allows_smoking:       d.allows_smoking,
+          allows_events:        d.allows_events,
+          airbnb_listing_id:    d.airbnb_listing_id,
+          auto_reply_enabled:   false,
+          reply_tone:           'friendly'
+        }
+      });
+      closeImportModal();
+      toast('success', 'Logement importé avec succès !');
+      await loadProperties();
+    } catch (err) {
+      toast('error', err.message || 'Erreur lors de l\'importation.');
+      btn.disabled = false;
+      btn.textContent = '✓ Importer maintenant';
+    }
+  }
+
+  // Opens the property form pre-filled — for users who want to review first
+  function openFormWithImport() {
+    if (!importedData) return;
+    _prefillPropertyForm(importedData);
+    closeImportModal();
+    document.getElementById('new-property-modal').classList.remove('hidden');
+    document.getElementById('property-name').focus();
+    toast('success', 'Formulaire pré-rempli ! Vérifiez et complétez les informations.');
+  }
+
+  // ---- Settings form ----
+  document.getElementById('settings-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    toast('info','Les cles API se configurent dans le fichier .env du serveur.');
+  });
+
+  // ---- Toast helper ----
+  function toast(type, message) {
+    const icons = { success:'', error:'', info:'' };
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + (type === 'info' ? 'info' : type);
+    t.setAttribute('role', 'status');
+    t.textContent = (icons[type] || '') + ' ' + message;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, 3000);
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-message');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 5000);
+  }
+
+  // ---- Auto-refresh conversations via SSE + polling ----
+  let dashPollTimer = null;
+  let _evtSource = null;
+  let currentSection = 'properties';
+  let _sseBackoff = 10000;
+
+  // ---- init ----
+  loadProperties();
+  if (window.requestIdleCallback) {
+    requestIdleCallback(() => {
+      loadConversations();
+      loadGmailAccounts();
+    }, { timeout: 1400 });
+  } else {
+    setTimeout(() => {
+      loadConversations();
+      loadGmailAccounts();
+    }, 350);
+  }
+
+  // Override showSection to track current section
+  const origShowSection = showSection;
+  showSection = function(name) {
+    currentSection = name;
+    origShowSection(name);
+  };
+
+  function startDashboardAutoRefresh() {
+    const token = localStorage.getItem('token');
+    if (typeof EventSource !== 'undefined' && token) {
+      try {
+        if (_evtSource) { _evtSource.close(); _evtSource = null; }
+        _evtSource = new EventSource('/api/sync/events?token=' + encodeURIComponent(token));
+
+        _evtSource.addEventListener('conversations_updated', () => {
+          if (currentSection === 'conversations') {
+            queueConversationsReload(120);
+          }
+        });
+
+        _evtSource.addEventListener('new_message', () => {
+          if (currentSection === 'conversations') {
+            queueConversationsReload(120);
+          }
+        });
+
+        _evtSource.addEventListener('connected', () => {
+          _sseBackoff = 10000; // reset backoff on success
+          startDashPolling(20000);
+        });
+
+        _evtSource.onerror = () => {
+          _evtSource.close();
+          _evtSource = null;
+          startDashPolling(_sseBackoff);
+          // Exponential backoff: 10s -> 20s -> 40s -> 60s max
+          _sseBackoff = Math.min(_sseBackoff * 2, 60000);
+          // Try reconnecting SSE after backoff
+          setTimeout(startDashboardAutoRefresh, _sseBackoff);
+        };
+      } catch (_) {
+        startDashPolling(10000);
+      }
+    } else {
+      startDashPolling(10000);
+    }
+  }
+
+  function startDashPolling(interval) {
+    if (dashPollTimer) clearInterval(dashPollTimer);
+    dashPollTimer = setInterval(() => {
+      if (currentSection === 'conversations') {
+        queueConversationsReload(220);
+      }
+    }, interval);
+  }
+
+  startDashboardAutoRefresh();
+
+  // ---- Gmail integration ----
+  async function connectGmail() {
+    const btn = document.getElementById('gmail-connect-btn');
+    btn.disabled = true;
+    btn.textContent = 'Chargement...';
+    try {
+      const data = await apiRequest('/api/gmail/auth-url');
+      window.location.href = data.url;
+    } catch (err) {
+      toast('error', 'Erreur: ' + (err.message || 'Impossible de se connecter à Gmail'));
+      btn.disabled = false;
+      btn.textContent = 'Connecter Gmail';
+    }
+  }
+
+  async function loadGmailAccounts() {
+    try {
+      const data = await apiRequest('/api/gmail/accounts');
+      const accounts = data.accounts || [];
+      const listEl = document.getElementById('gmail-accounts-list');
+      const btn = document.getElementById('gmail-connect-btn');
+      const statusText = document.getElementById('gmail-status-text');
+
+      if (accounts.length === 0) {
+        listEl.classList.add('hidden');
+        btn.textContent = 'Connecter Gmail';
+        statusText.textContent = 'Connectez votre Gmail pour recevoir automatiquement les messages Airbnb dans vos conversations.';
+        return;
+      }
+
+      // Show connected accounts
+      statusText.textContent = accounts.length + ' compte(s) Gmail connecté(s).';
+      btn.textContent = '+ Ajouter un autre';
+      listEl.classList.remove('hidden');
+      listEl.innerHTML = accounts.map(a => {
+        const isScopeError = a.sync_error && (a.sync_error.includes('scope') || a.sync_error.includes('re-auth') || a.sync_error.includes('re-add'));
+        const statusBadge = a.sync_error
+          ? '<span class="badge badge-status-checkedout">Erreur</span>'
+          : '<span class="badge badge-status-confirmed">Connecté</span>';
+        const lastSync = a.last_sync_at ? formatDate(a.last_sync_at) : 'Jamais';
+        return `
+          <div class="integration-card" style="padding:12px 16px;">
+            <div style="display:flex;align-items:center;gap:10px;flex:1;">
+              <i data-lucide="mail" style="width:20px;height:20px;flex-shrink:0;color:var(--clr-text-muted);"></i>
+              <div>
+                <strong>${escapeHtml(a.email)}</strong>
+                <div style="font-size:.78rem;color:var(--clr-text-muted);">Dernière sync : ${lastSync}</div>
+                ${a.sync_error ? '<div style="font-size:.75rem;color:#d93025;margin-top:2px;">' + escapeHtml(a.sync_error) + '</div>' : ''}
+              </div>
+            </div>
+            ${statusBadge}
+            ${isScopeError ? '<button class="btn btn-sm btn-primary" onclick="reauthorizeGmail(' + a.id + ')" title="Réautoriser les permissions Gmail" style="margin-left:8px;">Réautoriser</button>' : ''}
+            <button class="btn btn-sm btn-outline" onclick="syncGmail(${a.id})" title="Synchroniser maintenant" style="margin-left:8px;">Sync</button>
+            <button class="btn btn-sm btn-ghost" onclick="removeGmailAccount(${a.id})" title="Déconnecter" style="margin-left:4px;color:#d93025;">✕</button>
+          </div>`;
+      }).join('');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+      // Silent fail — not critical
+    }
+  }
+
+  async function syncGmail(accountId) {
+    try {
+      toast('info', 'Synchronisation Gmail en cours...');
+      const result = await apiRequest('/api/gmail/sync/' + accountId, { method: 'POST' });
+      toast('success', result.message || 'Synchronisation terminée');
+      loadGmailAccounts();
+      if (currentSection === 'conversations') loadConversations();
+    } catch (err) {
+      toast('error', err.message || 'Erreur de synchronisation');
+    }
+  }
+
+  async function removeGmailAccount(accountId) {
+    if (!confirm('Déconnecter ce compte Gmail ?')) return;
+    try {
+      await apiRequest('/api/gmail/accounts/' + accountId, { method: 'DELETE' });
+      toast('success', 'Compte Gmail déconnecté');
+      loadGmailAccounts();
+    } catch (err) {
+      toast('error', err.message || 'Erreur');
+    }
+  }
+
+  async function reauthorizeGmail(accountId) {
+    try {
+      toast('info', 'Redirection vers Google pour réautoriser...');
+      const data = await apiRequest('/api/gmail/reauthorize/' + accountId);
+      window.location.href = data.url;
+    } catch (err) {
+      toast('error', err.message || 'Erreur lors de la réautorisation');
+    }
+  }
+
+  // Auto-load Gmail accounts when integrations section is shown
+  const origShowSection2 = showSection;
+  showSection = function(name) {
+    origShowSection2(name);
+    if (name === 'integrations') loadGmailAccounts();
+  };
+
+  // Route to section based on URL hash (supports #conversations, #integrations, #settings, #properties)
+  const hashSection = window.location.hash.replace('#', '');
+  if (['properties', 'conversations', 'integrations', 'settings'].includes(hashSection)) {
+    showSection(hashSection);
+    // Sync bottom nav to match hash
+    const matchingNav = document.querySelector(`.bottom-nav-item[data-section="${hashSection}"]`);
+    if (matchingNav) updateBottomNav(matchingNav);
+  }
+
+  // Initialize Lucide icons (and re-init after dynamic renders)
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>
+</body>
+</html>

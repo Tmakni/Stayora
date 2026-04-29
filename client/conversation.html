@@ -1,0 +1,1032 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversation - HostAI</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <style>
+    /* Conversation page overrides */
+    .dashboard-main { padding: 28px 32px 40px; }
+    @media (max-width: 900px) {
+      .dashboard-main { padding: 14px 12px 80px; }
+    }
+  </style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Aller au contenu</a>
+
+<!-- LAYOUT -->
+<div class="dashboard-layout" id="main-content">
+
+  <!-- Mobile top bar -->
+  <div class="mobile-topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="mobile-topbar-title">HostAI</span>
+  </div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      </div>
+      <span class="sidebar-brand-name">HostAI</span>
+      <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
+    </div>
+
+    <span class="sidebar-section-label">Navigation</span>
+    <a class="nav-item" href="/index.html" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="home"></i></span> Propriétés
+    </a>
+    <a class="nav-item active" href="/index.html#conversations" style="text-decoration:none;" aria-current="page">
+      <span class="nav-icon"><i data-lucide="message-square"></i></span> Conversations
+    </a>
+    <a class="nav-item" href="/index.html#integrations" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="link"></i></span> Intégrations
+    </a>
+    <a class="nav-item" href="/calendar.html" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="calendar"></i></span> Calendrier
+    </a>
+
+    <div class="sidebar-spacer"></div>
+
+    <span class="sidebar-section-label">Compte</span>
+    <a class="nav-item" href="/index.html#settings" style="text-decoration:none;">
+      <span class="nav-icon"><i data-lucide="settings"></i></span> Paramètres
+    </a>
+
+    <div class="sidebar-user">
+      <div class="sidebar-user-avatar" id="sidebar-avatar">H</div>
+      <div class="sidebar-user-info">
+        <span class="sidebar-user-email" id="user-email"></span>
+      </div>
+      <button class="btn btn-ghost btn-icon sidebar-logout-btn" onclick="logout()" aria-label="Se déconnecter" title="Déconnexion">
+        <i data-lucide="log-out"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="dashboard-main">
+
+  <!-- Loading -->
+  <div id="loading" class="loading" aria-live="polite">
+    <div class="spinner" role="status" aria-label="Chargement de la conversation"></div>
+    <p>Chargement de la conversation...</p>
+  </div>
+
+  <!-- Main content -->
+  <div id="conversation-content" class="hidden">
+
+    <!-- Breadcrumb + title -->
+    <div class="chat-header" style="margin-bottom:24px;">
+      <div>
+        <h1 id="conversation-title" style="font-size:1.3rem;margin-bottom:6px;"></h1>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <span class="badge" id="booking-status-badge"></span>
+          <span class="meta-pill" id="property-meta" style="display:none;"> <span id="property-name-meta"></span></span>
+          <span class="meta-pill" id="created-meta"></span>
+        </div>
+      </div>
+      <a href="/index.html" class="btn btn-outline btn-sm" aria-label="Retour au tableau de bord"> Retour</a>
+    </div>
+
+    <!-- Mobile view tabs -->
+    <div class="conv-mobile-tabs" id="conv-mobile-tabs">
+      <button class="conv-mobile-tab active" onclick="switchConvTab('chat')">💬 Conversation</button>
+      <button class="conv-mobile-tab" onclick="switchConvTab('info')">📋 Infos</button>
+      <button class="conv-mobile-tab" onclick="switchConvTab('reply')">✈ Répondre</button>
+    </div>
+
+    <!-- 2-col layout -->
+    <div class="conv-page-layout">
+
+      <!-- LEFT: Chat + input -->
+      <div>
+        <!-- Messages -->
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div class="card-header" style="padding:16px 20px;margin:0;border-radius:0;">
+            <h2 class="card-title" style="font-size:1rem;"> Conversation</h2>
+            <span id="message-count" class="meta-pill">0 message</span>
+          </div>
+          <div
+            class="messages-container"
+            id="messages-container"
+            role="log"
+            aria-label="Messages de la conversation"
+            aria-live="polite"
+            style="border:none;border-radius:0;height:460px;"
+          >
+            <p class="msg-empty">Aucun message pour le moment</p>
+          </div>
+        </div>
+
+        <!-- Direct Airbnb reply (visible only for Airbnb conversations) -->
+        <div id="direct-airbnb-reply" class="card hidden" style="margin-top:16px;border:1px solid #FF5A5F33;">
+          <h3 style="margin-bottom:12px;font-size:1rem;color:#FF5A5F;">✈ Répondre sur Airbnb</h3>
+          <div class="form-group">
+            <label for="direct-airbnb-message">Votre message</label>
+            <textarea
+              id="direct-airbnb-message"
+              rows="4"
+              placeholder="Tapez votre réponse à envoyer sur Airbnb..."
+              maxlength="2000"
+              aria-label="Message direct Airbnb"
+            ></textarea>
+            <div class="char-count" id="direct-airbnb-char-count" aria-live="polite">0 / 2000</div>
+          </div>
+          <button class="btn btn-primary btn-full" id="direct-airbnb-send-btn" style="background:#FF5A5F;border-color:#FF5A5F;">
+            ✈ Copier &amp; ouvrir Airbnb
+          </button>
+          <p id="direct-airbnb-hint" style="margin-top:8px;font-size:.78rem;color:var(--clr-text-muted);text-align:center;">Le message sera copié dans votre presse-papier et la messagerie Airbnb s'ouvrira.</p>
+        </div>
+
+        <!-- Generate AI reply button -->
+        <div class="card" style="margin-top:16px;text-align:center;">
+          <button class="btn btn-primary btn-full" id="generate-btn">
+             Générer un message IA
+          </button>
+          <p id="generate-hint" class="text-muted" style="margin-top:8px;font-size:.8rem;">Génère une réponse au dernier message de la conversation.</p>
+        </div>
+
+        <!-- Draft result -->
+        <div id="draft-result" class="draft-result hidden" aria-live="polite">
+          <div class="draft-result-header">
+            <h3 style="font-size:1rem;color:var(--clr-text);"> Reponse generee par l'IA</h3>
+            <button class="btn btn-ghost btn-sm" id="close-draft-btn" aria-label="Fermer le brouillon">✕</button>
+          </div>
+
+          <div class="draft-meta">
+            <div class="draft-meta-item">
+              <strong>Intention:</strong>
+              <span id="draft-intent" class="badge badge-status-inquiry"></span>
+            </div>
+            <div class="draft-meta-item">
+              <strong>Risque:</strong>
+              <span id="draft-risk" class="badge"></span>
+            </div>
+            <span id="draft-escalate-badge" class="badge badge-escalate hidden" role="alert"> ESCALADE</span>
+          </div>
+
+          <div id="host-note-section" class="host-note hidden" role="note" aria-label="Note pour l hote">
+            <strong> Note hote :</strong>
+            <p id="host-note-text"></p>
+          </div>
+
+          <div id="host-question-section" class="hidden" style="background:var(--clr-warning-light);border:1px solid #FFE082;border-radius:var(--radius-md);padding:12px 14px;margin-bottom:10px;">
+            <strong style="color:#B06000;">L'IA a besoin de votre réponse :</strong>
+            <p id="host-question-text" style="margin:6px 0 0;font-size:.9rem;color:var(--clr-text-secondary);"></p>
+          </div>
+
+          <div id="missing-questions-section" class="missing-questions hidden">
+            <strong> Infos manquantes :</strong>
+            <ul id="missing-questions-list"></ul>
+          </div>
+
+          <label for="draft-reply-text" style="font-size:.82rem;font-weight:600;display:block;margin-bottom:6px;">Reponse (editable)</label>
+          <textarea class="draft-textarea" id="draft-reply-text" aria-label="Reponse generee, modifiable"></textarea>
+
+          <div class="draft-actions" style="margin-top:12px;">
+            <button class="btn btn-sm btn-outline" id="copy-btn" aria-label="Copier la reponse"> Copier</button>
+            <button class="btn btn-sm btn-secondary" id="save-outgoing-btn" aria-label="Enregistrer comme envoye">
+               Enregistrer
+            </button>
+            <button class="btn btn-sm btn-primary" id="send-airbnb-btn" style="display:none;background:#FF5A5F;border-color:#FF5A5F;" aria-label="Envoyer via Airbnb">
+              ✈ Copier &amp; ouvrir Airbnb
+            </button>
+            <button class="btn btn-sm btn-primary" id="send-superhot-btn" style="display:none;" aria-label="Envoyer via Superhot">
+               Envoyer via Superhot
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Property context + settings -->
+      <aside aria-label="Contexte du logement">
+
+        <!-- Property info -->
+        <div id="property-info-panel" class="property-info-card hidden">
+          <h3 style="font-size:.95rem;margin-bottom:12px;color:var(--clr-text);"> Logement associe</h3>
+          <div id="property-info-content"></div>
+        </div>
+
+        <!-- Context card -->
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-header" style="padding-bottom:12px;margin-bottom:14px;">
+            <h3 class="card-title" style="font-size:.95rem;"> Contexte supplementaire</h3>
+            <button class="btn btn-outline btn-sm" id="toggle-context-btn" aria-expanded="false" aria-controls="property-context-form">Modifier</button>
+          </div>
+
+          <div id="property-context-display" aria-live="polite">
+            <p class="text-muted" style="font-size:.85rem;">Aucun contexte additionnel configure.</p>
+          </div>
+
+          <div id="property-context-form" class="hidden" style="margin-top:14px;">
+            <div class="form-group">
+              <label for="context-json">Contexte JSON additionnel</label>
+              <textarea
+                id="context-json"
+                rows="8"
+                aria-label="Contexte JSON du logement"
+                placeholder='{
+  "wifi_password": "SuperPass2025",
+  "check_in_time": "15:00",
+  "check_out_time": "11:00",
+  "entry_code": "1234",
+  "parking": "Rue libre devant le logement",
+  "extra_rules": "Silence apres 22h"
+}'
+              ></textarea>
+            </div>
+            <button class="btn btn-primary btn-sm" id="save-context-btn">Sauvegarder</button>
+          </div>
+        </div>
+
+        <!-- Status editor -->
+        <div class="card">
+          <div class="card-header" style="padding-bottom:12px;margin-bottom:14px;">
+            <h3 class="card-title" style="font-size:.95rem;"> Statut reservation</h3>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="status-select" class="sr-only">Changer le statut</label>
+            <select id="status-select" aria-label="Statut de la conversation">
+              <option value="inquiry">Demande d'info</option>
+              <option value="request">Demande de résa</option>
+              <option value="confirmed">Confirmée</option>
+              <option value="checkedin">En séjour</option>
+              <option value="checkedout">Terminée</option>
+            </select>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </div>
+
+  </main>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
+
+<!-- Mobile bottom navigation -->
+<nav class="mobile-bottom-nav" aria-label="Navigation mobile">
+  <div class="mobile-bottom-nav-inner">
+    <a class="bottom-nav-item" href="/index.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Logements</span>
+    </a>
+    <a class="bottom-nav-item active" href="/index.html#conversations">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span>Messages</span>
+    </a>
+    <a class="bottom-nav-item" href="/calendar.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Calendrier</span>
+    </a>
+    <a class="bottom-nav-item" href="/index.html#settings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>Réglages</span>
+    </a>
+  </div>
+</nav>
+
+<script src="app.js"></script>
+<script>
+  // Mobile sidebar toggle
+  function toggleSidebar() { document.getElementById('dashboard-sidebar').classList.toggle('open'); document.getElementById('sidebar-overlay').classList.toggle('open'); }
+  function closeSidebar() { document.getElementById('dashboard-sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('open'); }
+
+  // ---- Mobile conversation view tabs ----
+  function switchConvTab(tab) {
+    const tabs = document.querySelectorAll('.conv-mobile-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+
+    const layout = document.querySelector('.conv-page-layout');
+    const chatCol = layout.children[0]; // first child = left column (chat + inputs)
+    const infoCol = layout.querySelector(':scope > aside');
+    const airbnbReply = document.getElementById('direct-airbnb-reply');
+    const generateBtn = document.getElementById('generate-btn');
+    const generateCard = generateBtn ? generateBtn.closest('.card') : null;
+    const draftResult = document.getElementById('draft-result');
+    const messagesContainer = document.getElementById('messages-container');
+    const messagesCard = messagesContainer ? messagesContainer.closest('.card') : null;
+
+    if (tab === 'chat') {
+      if (chatCol) chatCol.classList.remove('mobile-hidden');
+      if (infoCol) infoCol.classList.remove('mobile-visible');
+      if (messagesCard) messagesCard.style.display = '';
+      if (generateCard) generateCard.style.display = '';
+      if (draftResult) draftResult.style.display = '';
+      if (airbnbReply) airbnbReply.style.display = 'none';
+    } else if (tab === 'info') {
+      if (chatCol) chatCol.classList.add('mobile-hidden');
+      if (infoCol) infoCol.classList.add('mobile-visible');
+    } else if (tab === 'reply') {
+      if (chatCol) chatCol.classList.remove('mobile-hidden');
+      if (infoCol) infoCol.classList.remove('mobile-visible');
+      if (messagesCard) messagesCard.style.display = 'none';
+      if (generateCard) generateCard.style.display = 'none';
+      if (draftResult) draftResult.style.display = 'none';
+      if (airbnbReply) { airbnbReply.classList.remove('hidden'); airbnbReply.style.display = ''; }
+    }
+  }
+
+  // ---- Mobile copy feedback ----
+  function showCopyFeedback() {
+    const existing = document.querySelector('.copy-feedback');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.className = 'copy-feedback';
+    el.innerHTML = '✓ Message copié !';
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 1500);
+    setTimeout(() => el.remove(), 1800);
+  }
+
+  const conversationId = new URLSearchParams(window.location.search).get('id');
+  let conversation = null;
+  let messages = [];
+  let propertyContext = {};
+
+  checkAuth();
+  const _email = localStorage.getItem('user_email') || '';
+  document.getElementById('user-email').textContent = _email;
+  const _av = document.getElementById('sidebar-avatar');
+  if (_av && _email) _av.textContent = _email[0].toUpperCase();
+
+  // ---- Load conversation ----
+  async function loadConversation() {
+    if (!conversationId) {
+      toast('error','ID de conversation manquant');
+      setTimeout(() => window.location.href = '/index.html', 2000);
+      return;
+    }
+
+    try {
+      const data = await apiRequest('/api/conversations/' + conversationId);
+      conversation = data.conversation;
+      messages     = data.messages;
+
+      if (conversation.property_context) {
+        propertyContext = conversation.property_context.context || {};
+      }
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('conversation-content').classList.remove('hidden');
+
+      // Mark as read — store current timestamp so the list no longer shows it as unread
+      try { localStorage.setItem('conv_read_' + conversationId, Date.now().toString()); } catch(_) {}
+
+      renderPage();
+    } catch(e) {
+      toast('error', e.message);
+      setTimeout(() => window.location.href = '/index.html', 2500);
+    }
+  }
+
+  function renderPage() {
+    // Title
+    document.getElementById('conversation-title').textContent = conversation.title;
+
+    // Status badge
+    const statusLabels = {inquiry:"Demande d'info",request:"Demande de résa",confirmed:'Confirmée',checkedin:'En séjour',checkedout:'Terminée'};
+    const statusClass  = {inquiry:'badge-status-inquiry',request:'badge-status-request',confirmed:'badge-status-confirmed',checkedin:'badge-status-checkedin',checkedout:'badge-status-checkedout'};
+    const badge = document.getElementById('booking-status-badge');
+    badge.textContent = statusLabels[conversation.booking_status] || conversation.booking_status;
+    badge.className = 'badge ' + (statusClass[conversation.booking_status] || '');
+
+    // Status select
+    document.getElementById('status-select').value = conversation.booking_status || 'inquiry';
+
+    // Created meta
+    document.getElementById('created-meta').textContent = 'Cree le ' + formatDate(conversation.created_at);
+
+    // Show Airbnb buttons if conversation is linked to Airbnb
+    const isAirbnb = conversation.is_airbnb || conversation.airbnb_thread_id;
+    if (isAirbnb) {
+      document.getElementById('send-airbnb-btn').style.display = '';
+      document.getElementById('direct-airbnb-reply').classList.remove('hidden');
+
+      // If API sending is available, update button labels
+      if (conversation.has_airbnb_api) {
+        document.getElementById('send-airbnb-btn').textContent = '✈ Envoyer via Airbnb';
+        document.getElementById('direct-airbnb-send-btn').textContent = '✈ Envoyer sur Airbnb';
+        document.getElementById('direct-airbnb-hint').style.display = 'none';
+      }
+    }
+
+    // Property meta
+    if (conversation.property_context) {
+      const nameEl = document.getElementById('property-name-meta');
+      nameEl.textContent = conversation.property_context.name;
+      const metaEl = document.getElementById('property-meta');
+      metaEl.style.display = '';
+      // Apply property color
+      if (conversation.property_id) {
+        const PROPERTY_COLORS = [
+          { color: '#6366F1', light: '#EEF2FF' },
+          { color: '#EC4899', light: '#FDF2F8' },
+          { color: '#F59E0B', light: '#FFFBEB' },
+          { color: '#10B981', light: '#ECFDF5' },
+          { color: '#3B82F6', light: '#EFF6FF' },
+          { color: '#8B5CF6', light: '#F5F3FF' },
+          { color: '#EF4444', light: '#FEF2F2' },
+          { color: '#14B8A6', light: '#F0FDFA' },
+          { color: '#F97316', light: '#FFF7ED' },
+          { color: '#06B6D4', light: '#ECFEFF' },
+        ];
+        const pc = PROPERTY_COLORS[(conversation.property_id - 1) % PROPERTY_COLORS.length];
+        metaEl.style.background = pc.light;
+        metaEl.style.color = pc.color;
+        metaEl.style.fontWeight = '600';
+        metaEl.style.borderRadius = '999px';
+        metaEl.style.padding = '2px 10px';
+        metaEl.style.fontSize = '.75rem';
+      }
+      renderPropertyInfo(conversation.property_context);
+    }
+
+    renderMessages();
+    renderContextDisplay();
+  }
+
+  function renderPropertyInfo(propCtx) {
+    const panel   = document.getElementById('property-info-panel');
+    const content = document.getElementById('property-info-content');
+    panel.classList.remove('hidden');
+
+    const ctx = propCtx.context || {};
+    const amenities = [];
+    if (ctx.amenities) {
+      if (ctx.amenities.wifi)              amenities.push('Wi-Fi');
+      if (ctx.amenities.pool)              amenities.push('Piscine');
+      if (ctx.amenities.parking)           amenities.push('Parking');
+      if (ctx.amenities.kitchen)           amenities.push('Cuisine');
+      if (ctx.amenities.air_conditioning)  amenities.push('Clim');
+    }
+
+    content.innerHTML = `
+      <div class="property-info-row">
+        <span class="text-muted" style="font-size:.78rem;">Type</span>
+        <strong style="font-size:.82rem;">${escapeHtml(ctx.property_type || propCtx.name)}</strong>
+      </div>
+      <div class="property-info-row">
+        <span class="text-muted" style="font-size:.78rem;">Capacite</span>
+        <strong style="font-size:.82rem;">${ctx.max_guests || '?'} voyageurs max</strong>
+      </div>
+      ${ctx.rules ? `
+      <div class="property-info-row">
+        <span class="text-muted" style="font-size:.78rem;">Animaux</span>
+        <strong style="font-size:.82rem;">${ctx.rules.pets ? 'Oui' : 'Non'}</strong>
+      </div>` : ''}
+      ${amenities.length ? `
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;">
+        ${amenities.map(a=>`<span class="amenity-tag">${a}</span>`).join('')}
+      </div>` : ''}
+    `;
+  }
+
+  function renderMessages() {
+    const container = document.getElementById('messages-container');
+    const count     = document.getElementById('message-count');
+    count.textContent = messages.length + ' message' + (messages.length !== 1 ? 's' : '');
+
+    if (messages.length === 0) {
+      container.innerHTML = '<p class="msg-empty">Aucun message pour le moment</p>';
+      return;
+    }
+
+    container.innerHTML = messages.map((msg, i) => {
+      if (msg.role === 'system') {
+        return `<div class="message system" role="article" aria-label="Notification IA" style="background:var(--clr-warning-light);border:1px solid #FFE082;border-radius:var(--radius-md);padding:10px 14px;margin:6px 20px;font-size:.85rem;color:var(--clr-text-secondary);animation:msgIn .2s ease ${Math.min(i * 20, 300)}ms both;">
+          <div class="message-header">
+            <span class="message-sender">Question pour l'hôte</span>
+            <time class="message-time" datetime="${msg.created_at}">${formatDate(msg.created_at)}</time>
+          </div>
+          <div class="message-content" style="color:var(--clr-text-secondary);">${escapeHtml(msg.content)}</div>
+        </div>`;
+      }
+      return `<div class="message ${msg.role}" role="article" aria-label="${msg.role === 'incoming' ? 'Message du voyageur' : 'Reponse hote'}" style="animation:msgIn .2s ease ${Math.min(i * 20, 300)}ms both;">
+        <div class="message-header">
+          <span class="message-sender">${msg.role === 'incoming' ? ' Voyageur' : ' Hote'}</span>
+          <time class="message-time" datetime="${msg.created_at}">${formatDate(msg.created_at)}</time>
+        </div>
+        <div class="message-content">${escapeHtml(msg.content)}</div>
+      </div>`;
+    }).join('');
+
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function renderContextDisplay() {
+    const display = document.getElementById('property-context-display');
+    const textarea = document.getElementById('context-json');
+
+    const keys = Object.keys(propertyContext);
+    if (keys.length === 0) {
+      display.innerHTML = '<p class="text-muted" style="font-size:.85rem;">Aucun contexte additionnel configure.</p>';
+    } else {
+      display.innerHTML = `<dl style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.82rem;">` +
+        keys.map(k => `
+          <dt style="color:var(--clr-text-muted);font-weight:600;">${escapeHtml(k)}</dt>
+          <dd style="color:var(--clr-text);">${escapeHtml(String(propertyContext[k]))}</dd>
+        `).join('') + `</dl>`;
+    }
+
+    textarea.value = JSON.stringify(
+      keys.length ? propertyContext : { wifi_password:'', check_in_time:'15:00', check_out_time:'11:00', entry_code:'' },
+      null, 2
+    );
+  }
+
+
+
+  // ---- Direct Airbnb reply char counter ----
+  const directAirbnbTA = document.getElementById('direct-airbnb-message');
+  directAirbnbTA.addEventListener('input', () => {
+    document.getElementById('direct-airbnb-char-count').textContent = directAirbnbTA.value.length + ' / 2000';
+  });
+
+  // ---- Direct Airbnb send (copy + open or API) ----
+  document.getElementById('direct-airbnb-send-btn').addEventListener('click', async () => {
+    const msg = document.getElementById('direct-airbnb-message').value.trim();
+    if (!msg) { toast('error', 'Veuillez saisir un message.'); return; }
+
+    const btn = document.getElementById('direct-airbnb-send-btn');
+
+    // Build the Airbnb thread URL for this conversation
+    const airbnbThreadUrl = conversation.airbnb_thread_id
+      ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}`
+      : 'https://www.airbnb.com/hosting/inbox';
+    console.log('[Airbnb Direct] thread_id:', conversation.airbnb_thread_id, '→', airbnbThreadUrl);
+
+    if (conversation.has_airbnb_api) {
+      // API mode: send directly then open the conversation on Airbnb
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px;"></span> Envoi en cours...';
+      try {
+        await apiRequest('/api/conversations/' + conversationId + '/send-airbnb', {
+          method: 'POST', body: { message: msg }
+        });
+        const data = await apiRequest('/api/conversations/' + conversationId);
+        messages = data.messages;
+        renderMessages();
+        document.getElementById('direct-airbnb-message').value = '';
+        document.getElementById('direct-airbnb-char-count').textContent = '0 / 2000';
+        window.open(airbnbThreadUrl, '_blank');
+        toast('success', 'Message envoyé sur Airbnb !');
+      } catch(err) {
+        toast('error', 'Erreur Airbnb: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '✈ Envoyer sur Airbnb';
+      }
+    } else {
+      // Fallback: copy to clipboard + open Airbnb conversation
+      try {
+        await navigator.clipboard.writeText(msg);
+        showCopyFeedback();
+        // Save as outgoing in our DB
+        await apiRequest('/api/conversations/' + conversationId + '/messages', {
+          method: 'POST', body: { role: 'outgoing', content: msg, metadata: { source: 'manual_airbnb_copy' } }
+        });
+        const data = await apiRequest('/api/conversations/' + conversationId);
+        messages = data.messages;
+        renderMessages();
+        document.getElementById('direct-airbnb-message').value = '';
+        document.getElementById('direct-airbnb-char-count').textContent = '0 / 2000';
+        window.open(airbnbThreadUrl, '_blank');
+        toast('success', 'Message copié ! Collez-le dans la messagerie Airbnb.');
+      } catch(err) {
+        toast('error', err.message);
+      }
+    }
+  });
+
+  // ---- Toggle context form ----
+  document.getElementById('toggle-context-btn').addEventListener('click', () => {
+    const form    = document.getElementById('property-context-form');
+    const display = document.getElementById('property-context-display');
+    const btn     = document.getElementById('toggle-context-btn');
+    const open    = form.classList.toggle('hidden');
+    display.classList.toggle('hidden');
+    btn.textContent  = open ? 'Modifier' : 'Fermer';
+    btn.setAttribute('aria-expanded', String(!open));
+  });
+
+  // ---- Save context ----
+  document.getElementById('save-context-btn').addEventListener('click', () => {
+    try {
+      propertyContext = JSON.parse(document.getElementById('context-json').value);
+      renderContextDisplay();
+      document.getElementById('property-context-form').classList.add('hidden');
+      document.getElementById('property-context-display').classList.remove('hidden');
+      document.getElementById('toggle-context-btn').textContent = 'Modifier';
+      toast('success','Contexte sauvegarde localement !');
+    } catch(e) { toast('error','JSON invalide. Verifiez la syntaxe.'); }
+  });
+
+  // ---- Close draft ----
+  document.getElementById('close-draft-btn').addEventListener('click', () => {
+    document.getElementById('draft-result').classList.add('hidden');
+    window.currentDraft = null;
+  });
+
+  // ---- Status change ----
+  document.getElementById('status-select').addEventListener('change', async (e) => {
+    try {
+      await apiRequest('/api/conversations/' + conversationId, { method:'PUT', body:{ booking_status: e.target.value }});
+      updateStatusBadge(e.target.value);
+      toast('success','Statut mis à jour.');
+    } catch(err) { toast('error', err.message); }
+  });
+
+  // ---- Helper: update status badge + select ----
+  function updateStatusBadge(status) {
+    const statusLabels = {inquiry:"Demande d'info",request:"Demande de résa",confirmed:'Confirmée',checkedin:'En séjour',checkedout:'Terminée'};
+    const statusClasses = {inquiry:'badge-status-inquiry',request:'badge-status-request',confirmed:'badge-status-confirmed',checkedin:'badge-status-checkedin',checkedout:'badge-status-checkedout'};
+    const badge = document.getElementById('booking-status-badge');
+    badge.textContent = statusLabels[status] || status;
+    badge.className = 'badge ' + (statusClasses[status] || '');
+    document.getElementById('status-select').value = status;
+    if (conversation) conversation.booking_status = status;
+  }
+
+  // ---- Generate AI draft (uses last message from conversation) ----
+  document.getElementById('generate-btn').addEventListener('click', async () => {
+    // Find last incoming message in conversation
+    const lastIncoming = [...messages].reverse().find(m => m.role === 'incoming');
+    if (!lastIncoming) {
+      toast('error', 'Aucun message de voyageur dans la conversation.');
+      return;
+    }
+    const msg = lastIncoming.content.trim();
+    if (!msg) return;
+
+    const btn   = document.getElementById('generate-btn');
+    const draft = document.getElementById('draft-result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Génération en cours...';
+    draft.classList.add('hidden');
+
+    try {
+      const result = await apiRequest('/api/ai/draft', {
+        method: 'POST',
+        body: {
+          conversation_id: conversationId,
+          incoming_message: msg,
+          booking_status:  conversation ? conversation.booking_status : 'inquiry',
+          property_context: propertyContext
+        }
+      });
+
+      if (result.no_reply_needed) {
+        toast('info', 'Ce message ne nécessite pas de réponse (message de courtoisie).');
+        return;
+      }
+
+      displayDraft(result, msg);
+
+      // Auto-update status badge if backend detected a status change
+      if (result.new_booking_status) {
+        updateStatusBadge(result.new_booking_status);
+      }
+    } catch(err) {
+      toast('error', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = ' Générer un message IA';
+    }
+  });
+
+  function displayDraft(result, incomingMessage) {
+    // Intent
+    const intentEl = document.getElementById('draft-intent');
+    intentEl.textContent = result.intent || 'general';
+
+    // Risk
+    const riskEl = document.getElementById('draft-risk');
+    riskEl.textContent = result.risk_level || 'low';
+    riskEl.className = 'badge risk-' + (result.risk_level || 'low');
+
+    // Escalate
+    const escEl = document.getElementById('draft-escalate-badge');
+    escEl.classList.toggle('hidden', !result.escalate);
+
+    // Host note
+    const noteSection = document.getElementById('host-note-section');
+    if (result.host_note) {
+      document.getElementById('host-note-text').textContent = result.host_note;
+      noteSection.classList.remove('hidden');
+    } else {
+      noteSection.classList.add('hidden');
+    }
+
+    // Host question (needs_host mode — AI couldn't answer)
+    const hostQuestionSection = document.getElementById('host-question-section');
+    if (result.needs_host && result.host_question) {
+      document.getElementById('host-question-text').textContent = result.host_question;
+      hostQuestionSection.classList.remove('hidden');
+    } else {
+      hostQuestionSection.classList.add('hidden');
+    }
+
+    // Missing info
+    const missingSection = document.getElementById('missing-questions-section');
+    if (result.missing_info_questions && result.missing_info_questions.length) {
+      document.getElementById('missing-questions-list').innerHTML =
+        result.missing_info_questions.map(q=>`<li>${escapeHtml(q)}</li>`).join('');
+      missingSection.classList.remove('hidden');
+    } else {
+      missingSection.classList.add('hidden');
+    }
+
+    // Draft text - editable
+    const draftTextarea = document.getElementById('draft-reply-text');
+    const draftLabel = draftTextarea.previousElementSibling;
+    
+    if (result.needs_host && !result.draft_reply) {
+      draftTextarea.value = '';
+      draftTextarea.placeholder = "L'IA n'a pas pu répondre — rédigez votre réponse ici ou répondez à la question ci-dessus pour relancer l'IA.";
+      if (draftLabel) draftLabel.textContent = 'Votre réponse manuelle';
+    } else {
+      draftTextarea.value = result.draft_reply || '';
+      draftTextarea.placeholder = '';
+      if (draftLabel) draftLabel.textContent = 'Reponse (editable)';
+    }
+
+    document.getElementById('draft-result').classList.remove('hidden');
+    document.getElementById('draft-result').scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+    window.currentDraft = { reply: result.draft_reply, incomingMessage, metadata: result };
+  }
+
+  // ---- Copy button ----
+  document.getElementById('copy-btn').addEventListener('click', () => {
+    const text = document.getElementById('draft-reply-text').value;
+    if (!text) { toast('error','Aucun texte a copier.'); return; }
+    navigator.clipboard.writeText(text).then(() => toast('success','Reponse copiee !'));
+  });
+
+  // ---- Save as sent ----
+  let savingOutgoing = false;
+  document.getElementById('save-outgoing-btn').addEventListener('click', async () => {
+    if (!window.currentDraft) return;
+    if (savingOutgoing) return; // prevent double-click
+    const editedReply = document.getElementById('draft-reply-text').value.trim();
+    if (!editedReply) { toast('error', 'Le message est vide.'); return; }
+
+    savingOutgoing = true;
+    const btn = document.getElementById('save-outgoing-btn');
+    btn.disabled = true;
+
+    try {
+      await apiRequest('/api/conversations/' + conversationId + '/messages', {
+        method:'POST', body:{ role:'outgoing', content:editedReply, metadata:window.currentDraft.metadata }
+      });
+
+      // Reload messages
+      const data = await apiRequest('/api/conversations/' + conversationId);
+      messages = data.messages;
+      lastMessageCount = messages.length;
+      renderMessages();
+
+      document.getElementById('draft-result').classList.add('hidden');
+      window.currentDraft = null;
+      toast('success','Réponse enregistrée !');
+    } catch(err) { toast('error', err.message); }
+    finally { savingOutgoing = false; btn.disabled = false; }
+  });
+
+  // ---- Send to Airbnb (from draft panel) ----
+  document.getElementById('send-airbnb-btn').addEventListener('click', async () => {
+    const editedReply = document.getElementById('draft-reply-text').value.trim();
+    if (!editedReply) { toast('error', 'Aucun message à envoyer.'); return; }
+
+    const btn = document.getElementById('send-airbnb-btn');
+
+
+
+    // Build the Airbnb thread URL for this conversation
+    const airbnbDraftUrl = conversation.airbnb_thread_id
+      ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}`
+      : 'https://www.airbnb.com/hosting/inbox';
+    console.log('[Airbnb Draft] thread_id:', conversation.airbnb_thread_id, '→', airbnbDraftUrl);
+
+    if (conversation.has_airbnb_api) {
+      // API mode: send then open conversation on Airbnb
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px;"></span> Envoi...';
+      try {
+        await apiRequest('/api/conversations/' + conversationId + '/send-airbnb', {
+          method: 'POST', body: { message: editedReply }
+        });
+        const data = await apiRequest('/api/conversations/' + conversationId);
+        messages = data.messages;
+        renderMessages();
+        document.getElementById('draft-result').classList.add('hidden');
+        window.currentDraft = null;
+        window.open(airbnbDraftUrl, '_blank');
+        toast('success', 'Message envoyé sur Airbnb !');
+      } catch(err) {
+        toast('error', 'Erreur Airbnb: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '✈ Envoyer via Airbnb';
+      }
+    } else {
+      // Fallback: copy + open Airbnb conversation
+      try {
+        await navigator.clipboard.writeText(editedReply);
+        showCopyFeedback();
+        await apiRequest('/api/conversations/' + conversationId + '/messages', {
+          method: 'POST', body: { role: 'outgoing', content: editedReply, metadata: { source: 'manual_airbnb_copy', ...(window.currentDraft?.metadata || {}) } }
+        });
+        const data = await apiRequest('/api/conversations/' + conversationId);
+        messages = data.messages;
+        renderMessages();
+        document.getElementById('draft-result').classList.add('hidden');
+        window.currentDraft = null;
+        window.open(airbnbDraftUrl, '_blank');
+        toast('success', 'Message copié ! Collez-le dans la messagerie Airbnb.');
+      } catch(err) {
+        toast('error', err.message);
+      }
+    }
+  });
+
+  // ---- Toast ----
+  function toast(type, message) {
+    const icons = { success:'', error:'', info:'ℹ' };
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + (type === 'info' ? 'info' : type);
+    t.setAttribute('role', 'alert');
+    t.textContent = (icons[type]||'') + ' ' + message;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, 3200);
+  }
+
+  // ---- Real-time updates via SSE + polling fallback ----
+  let pollTimer = null;
+  let lastMessageCount = 0;
+
+  function startAutoRefresh() {
+    // Try SSE first
+    const token = localStorage.getItem('token');
+    if (typeof EventSource !== 'undefined' && token) {
+      try {
+        const evtSource = new EventSource('/api/sync/events?token=' + encodeURIComponent(token));
+
+        evtSource.addEventListener('new_message', (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (String(data.conversation_id) === String(conversationId)) {
+              refreshMessages();
+            }
+          } catch (_) {}
+        });
+
+        evtSource.addEventListener('connected', () => {
+          // SSE working — use long polling as backup only
+          startPolling(30000);
+        });
+
+        evtSource.onerror = () => {
+          evtSource.close();
+          startPolling(10000);
+        };
+      } catch (_) {
+        startPolling(10000);
+      }
+    } else {
+      startPolling(10000);
+    }
+  }
+
+  function startPolling(interval) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(refreshMessages, interval);
+  }
+
+  async function refreshMessages() {
+    // Skip refresh if page is hidden (tab in background)
+    if (document.hidden) return;
+    try {
+      const data = await apiRequest('/api/conversations/' + conversationId);
+      const newMessages = data.messages || [];
+
+      // Update booking status if changed on server
+      if (data.conversation && data.conversation.booking_status && 
+          data.conversation.booking_status !== (conversation && conversation.booking_status)) {
+        conversation.booking_status = data.conversation.booking_status;
+        updateStatusBadge(data.conversation.booking_status);
+      }
+
+      if (newMessages.length !== lastMessageCount) {
+        const hadMessages = lastMessageCount > 0;
+        messages = newMessages;
+        lastMessageCount = messages.length;
+        renderMessages();
+        if (hadMessages) {
+          toast('info', 'Nouveau message reçu !');
+          // Auto-generate draft for the new message if unanswered
+          autoGenerateDraft();
+        }
+      }
+    } catch (_) {
+      // Silently fail — will retry next interval
+    }
+  }
+
+  // ---- Auto-generate AI draft if last message is incoming and unanswered ----
+  let autoGenerateRunning = false;
+  async function autoGenerateDraft() {
+    if (!messages || messages.length === 0) return;
+    if (autoGenerateRunning) return;
+
+    // Find last non-system message
+    const lastMsg = [...messages].reverse().find(m => m.role !== 'system');
+    if (!lastMsg || lastMsg.role !== 'incoming') return;
+
+    // Check if this incoming message was already answered (outgoing after it)
+    const lastIdx = messages.lastIndexOf(lastMsg);
+    const hasReplyAfter = messages.slice(lastIdx + 1).some(m => m.role === 'outgoing');
+    if (hasReplyAfter) {
+      console.log('[Auto-draft] Last incoming already has a reply, skipping.');
+      return;
+    }
+
+    // Skip if draft panel is already visible
+    if (!document.getElementById('draft-result').classList.contains('hidden')) return;
+
+    const msgText = lastMsg.content.trim();
+    if (!msgText) return;
+
+    // Client-side quick check: skip obvious courtesy messages
+    const courtesyPatterns = /^(merci|ok|d'accord|super|parfait|top|cool|nickel|genial|g[ée]nial|bonne journ[ée]e|bonne soir[ée]e|bonsoir|thanks|thank you|great|perfect|awesome|noted|got it|okay|ok merci|merci beaucoup|super merci|parfait merci|c'est not[ée]|c'est parfait|tres bien|très bien)[.!\s]*$/i;
+    if (courtesyPatterns.test(msgText)) {
+      console.log('[Auto-draft] Skipped courtesy message:', msgText);
+      return;
+    }
+
+    console.log('[Auto-draft] Generating draft for last incoming message...');
+    autoGenerateRunning = true;
+
+    const btn = document.getElementById('generate-btn');
+    const draft = document.getElementById('draft-result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Génération auto en cours...';
+    draft.classList.add('hidden');
+
+    try {
+      const result = await apiRequest('/api/ai/draft', {
+        method: 'POST',
+        body: {
+          conversation_id: conversationId,
+          incoming_message: msgText,
+          booking_status: conversation ? conversation.booking_status : 'inquiry',
+          property_context: propertyContext
+        }
+      });
+
+      // If AI says no reply needed, don't show draft
+      if (result.no_reply_needed) {
+        console.log('[Auto-draft] AI says no reply needed for:', msgText);
+        // Still update status if detected
+        if (result.new_booking_status) updateStatusBadge(result.new_booking_status);
+        return;
+      }
+
+      displayDraft(result, msgText);
+      if (result.new_booking_status) updateStatusBadge(result.new_booking_status);
+    } catch(err) {
+      console.warn('[Auto-draft] Failed:', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = ' Générer un message IA';
+      autoGenerateRunning = false;
+    }
+  }
+
+  // ---- Init ----
+  loadConversation().then(() => {
+    lastMessageCount = messages.length;
+    startAutoRefresh();
+    // Auto-generate draft after page loads
+    autoGenerateDraft();
+  });
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>
+</body>
+</html>
