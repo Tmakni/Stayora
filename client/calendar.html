@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Calendrier - HostAI</title>
+  <title>Calendrier — Stayora</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
   <style>
@@ -36,9 +36,9 @@
     .ical-help { font-size: .75rem; color: var(--clr-text-muted); margin-top: 8px; line-height: 1.5; }
 
     /* Calendar grid */
-    .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .cal-nav h2 { font-size: 1.1rem; margin: 0; text-transform: capitalize; }
-    .cal-nav button { background: none; border: 1px solid var(--clr-border); border-radius: var(--radius-sm); padding: 6px 14px; cursor: pointer; color: var(--clr-text); font-size: .85rem; }
+    .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 8px; }
+    .cal-nav h2 { font-size: 1.1rem; margin: 0; text-transform: capitalize; flex: 1; text-align: center; }
+    .cal-nav button { background: none; border: 1px solid var(--clr-border); border-radius: var(--radius-sm); padding: 8px 16px; cursor: pointer; color: var(--clr-text); font-size: .85rem; min-height: 40px; transition: background .15s; }
     .cal-nav button:hover { background: var(--clr-bg-alt); }
 
     .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
@@ -55,54 +55,114 @@
     .cal-event.reserved { background: #3B82F622; color: #3B82F6; border-left: 3px solid #3B82F6; }
     .cal-event.maintenance { background: #F59E0B22; color: #B06000; border-left: 3px solid #F59E0B; }
 
+    /* ── Mobile: tablet & phone (≤900px) ── */
+    @media (max-width: 900px) {
+      #calendar-main { padding: 12px 10px 80px !important; }
+
+      /* Property selector */
+      .ical-form input[type="url"] { min-width: 100%; }
+      .property-selector { flex-direction: column; gap: 8px; }
+      .property-selector select { min-width: 100%; font-size: .875rem; }
+
+      /* Calendar card: no overflow, fit screen cleanly */
+      .cal-card { padding: 10px !important; overflow: hidden; }
+
+      /* Grid: NO min-width — let 1fr columns fill available screen width */
+      .cal-grid { gap: 1px; }
+
+      /* Readable day headers */
+      .cal-header { font-size: .625rem; padding: 6px 2px; letter-spacing: 0; }
+
+      /* Touch-friendly day cells */
+      .cal-day { min-height: 52px; padding: 4px 3px; border-radius: 4px; }
+      .cal-day .day-num { font-size: .78rem; font-weight: 700; margin-bottom: 3px; }
+
+      /* Convert text events to colored dots on mobile */
+      .cal-event {
+        font-size: 0 !important;
+        line-height: 0 !important;
+        padding: 0 !important;
+        border-left: none !important;
+        border-radius: 50% !important;
+        width: 7px !important;
+        height: 7px !important;
+        min-width: 7px !important;
+        margin: 1px !important;
+        display: inline-block !important;
+        overflow: hidden !important;
+      }
+      .cal-event.reservation { background: #FF5A5F !important; }
+      .cal-event.blocked     { background: #6B7280 !important; }
+      .cal-event.reserved    { background: #3B82F6 !important; }
+      .cal-event.maintenance { background: #F59E0B !important; }
+
+      /* Dots container: horizontal row */
+      .cal-day-events { flex-direction: row !important; flex-wrap: wrap !important; gap: 2px !important; margin-top: 3px !important; }
+
+      /* Navigation: big touch targets */
+      .cal-nav { margin-bottom: 12px; }
+      .cal-nav h2 { font-size: .95rem; }
+      .cal-nav button {
+        padding: 10px 16px;
+        font-size: .82rem;
+        min-height: 44px;
+        min-width: 44px;
+        border-radius: 8px;
+      }
+
+      /* Legend */
+      .cal-legend { gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+      .cal-legend-item { font-size: .7rem; }
+      .cal-legend-dot { width: 8px; height: 8px; }
+
+      /* iCal card */
+      .ical-card { padding: 10px; }
+      .ical-status { gap: 8px; }
+      .ical-info .ical-label { font-size: .82rem; }
+      .ical-info .ical-detail { font-size: .72rem; }
+
+      h1 { font-size: 1.1rem !important; }
+
+      /* Show mobile events list below calendar */
+      .cal-mobile-events { display: block !important; }
+    }
+
+    /* ── Small phones (≤480px) ── */
+    @media (max-width: 480px) {
+      #calendar-main { padding: 10px 8px 80px !important; }
+      .cal-header { font-size: .575rem; padding: 5px 1px; }
+      .cal-day { min-height: 46px; padding: 3px 2px; }
+      .cal-day .day-num { font-size: .72rem; }
+      .cal-event { width: 6px !important; height: 6px !important; min-width: 6px !important; }
+      .cal-nav button { padding: 8px 12px; font-size: .78rem; min-height: 42px; }
+      .cal-nav h2 { font-size: .88rem; }
+    }
+
     /* Block form modal */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; align-items: center; justify-content: center; }
     .modal-overlay.active { display: flex; }
     .modal { background: var(--clr-bg); border-radius: var(--radius-lg); padding: 24px; width: 90%; max-width: 420px; box-shadow: var(--shadow-lg); }
     .modal h3 { margin: 0 0 16px; font-size: 1.05rem; }
     .modal .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 480px) {
+      .modal { padding: 18px; border-radius: 16px 16px 0 0; position: fixed; bottom: 0; left: 0; right: 0; width: 100%; max-width: 100%; }
+      .modal-overlay.active { align-items: flex-end; }
+      .modal .form-row { grid-template-columns: 1fr; }
+    }
 
     /* Legend */
     .cal-legend { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
     .cal-legend-item { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--clr-text-muted); }
     .cal-legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    @media (max-width: 900px) {
-      #calendar-main { padding: 14px 6px 80px !important; }
-      .ical-form input[type="url"] { min-width: 100%; }
-      .property-selector { flex-direction: column; gap: 8px; }
-      .property-selector select { min-width: 100%; font-size: .82rem; }
-
-      /* Force calendar grid to fit screen */
-      .cal-card { padding: 6px !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .cal-grid { gap: 1px; min-width: 300px; }
-      .cal-header { font-size: .55rem; padding: 4px 1px; letter-spacing: 0; }
-      .cal-day { min-height: 42px; padding: 2px; border-radius: 2px; }
-      .cal-day .day-num { font-size: .65rem; margin-bottom: 1px; }
-      .cal-event { font-size: .45rem; padding: 1px 2px; border-left-width: 2px; margin-bottom: 1px; line-height: 1.2; }
-      .cal-nav { margin-bottom: 10px; gap: 4px; }
-      .cal-nav h2 { font-size: .85rem; }
-      .cal-nav button { padding: 6px 8px; font-size: .72rem; }
-      .cal-legend { gap: 8px; margin-top: 8px; }
-      .cal-legend-item { font-size: .65rem; }
-      .cal-legend-dot { width: 8px; height: 8px; }
-      .ical-card { padding: 10px; }
-      .ical-status { gap: 8px; }
-      .ical-info .ical-label { font-size: .8rem; }
-      .ical-info .ical-detail { font-size: .7rem; }
-      h1 { font-size: 1.1rem !important; }
+    /* Mobile events list (hidden by default, shown via media query above) */
+    .cal-mobile-events { display: none; }
+    .cal-mobile-event-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
     }
-    @media (max-width: 400px) {
-      #calendar-main { padding: 10px 4px 76px !important; }
-      .cal-card { padding: 3px !important; }
-      .cal-grid { gap: 0; min-width: 280px; }
-      .cal-day { min-height: 36px; padding: 1px; border-width: 0.5px; }
-      .cal-day .day-num { font-size: .58rem; }
-      .cal-event { font-size: .4rem; padding: 0 1px; border-left-width: 1.5px; }
-      .cal-header { font-size: .48rem; padding: 3px 0; }
-      .cal-nav button { padding: 4px 6px; font-size: .65rem; }
-      .cal-nav h2 { font-size: .78rem; }
-    }
+    .cal-mobile-event-item:last-child { margin-bottom: 0; }
   </style>
 </head>
 <body>
@@ -115,7 +175,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">HostAI</span>
+    <span class="mobile-topbar-title">Stayora</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -123,9 +183,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <img src="logo.svg" width="32" height="32" alt="Stayora">
       </div>
-      <span class="sidebar-brand-name">HostAI</span>
+      <span class="sidebar-brand-name">Stayora</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 
@@ -199,11 +259,11 @@
   </div>
 
   <!-- Calendar grid -->
-  <div class="card cal-card" style="padding:16px;overflow-x:auto;">
+  <div class="card cal-card" style="padding:16px;">
     <div class="cal-nav">
-      <button id="prev-month">&larr; Mois précédent</button>
+      <button id="prev-month" aria-label="Mois précédent">&larr;</button>
       <h2 id="cal-month-label"></h2>
-      <button id="next-month">Mois suivant &rarr;</button>
+      <button id="next-month" aria-label="Mois suivant">&rarr;</button>
     </div>
     <div class="cal-grid" id="cal-grid"></div>
     <div class="cal-legend">
@@ -211,6 +271,17 @@
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#3B82F6;"></div> iCal (réservé)</div>
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#6B7280;"></div> Bloqué</div>
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#F59E0B;"></div> Maintenance</div>
+    </div>
+  </div>
+
+  <!-- Mobile events list — shown below calendar on small screens -->
+  <div class="card cal-mobile-events" id="mobile-events-list" style="padding:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3 style="font-size:.9rem;margin:0;">Événements ce mois</h3>
+      <span id="mobile-events-count" style="font-size:.72rem;color:var(--clr-text-muted);"></span>
+    </div>
+    <div id="mobile-events-content">
+      <p style="font-size:.82rem;color:var(--clr-text-muted);text-align:center;padding:12px 0;">Aucun événement ce mois.</p>
     </div>
   </div>
 
@@ -542,17 +613,20 @@
         return evStart <= dateStr && evEnd > dateStr;
       });
 
+      const eventsHtml = dayEvents.length > 0
+        ? `<div class="cal-day-events">${dayEvents.slice(0, 4).map(ev => {
+            let cls = 'blocked';
+            const evType = ev.type || ev.status || '';
+            if (evType === 'reservation') cls = 'reservation';
+            else if (evType === 'reserved') cls = 'reserved';
+            else if (evType === 'maintenance') cls = 'maintenance';
+            const title = ev.title || ev.summary || evType;
+            return `<div class="cal-event ${cls}" title="${escapeHtml(title)}">${escapeHtml(title)}</div>`;
+          }).join('')}${dayEvents.length > 4 ? `<span class="cal-event-more">+${dayEvents.length - 4}</span>` : ''}</div>`
+        : '';
+
       html += `<div class="cal-day${isToday ? ' today' : ''}" data-date="${dateStr}">
-        <div class="day-num">${day}</div>
-        ${dayEvents.map(ev => {
-          let cls = 'blocked';
-          const evType = ev.type || ev.status || '';
-          if (evType === 'reservation') cls = 'reservation';
-          else if (evType === 'reserved') cls = 'reserved';
-          else if (evType === 'maintenance') cls = 'maintenance';
-          const title = ev.title || ev.summary || evType;
-          return `<div class="cal-event ${cls}" title="${escapeHtml(title)}">${escapeHtml(title)}</div>`;
-        }).join('')}
+        <div class="day-num">${day}</div>${eventsHtml}
       </div>`;
     }
 
@@ -575,6 +649,61 @@
         openBlockModal();
       });
     });
+
+    // Render mobile events list below calendar
+    renderMobileEventsList(allEvents);
+  }
+
+  // ================================================================
+  // Mobile events list (visible on ≤900px via CSS)
+  // ================================================================
+  function renderMobileEventsList(allEvents) {
+    const listEl = document.getElementById('mobile-events-list');
+    const contentEl = document.getElementById('mobile-events-content');
+    const countEl = document.getElementById('mobile-events-count');
+    if (!listEl || !contentEl) return;
+
+    const monthStart = `${currentYear}-${String(currentMonth + 1).padStart(2,'0')}-01`;
+    const monthEnd   = `${currentYear}-${String(currentMonth + 1).padStart(2,'0')}-${new Date(currentYear, currentMonth + 1, 0).getDate()}`;
+
+    const monthEvents = allEvents
+      .filter(ev => {
+        const start = ev.start || ev.start_date;
+        const end   = ev.end   || ev.end_date;
+        return start <= monthEnd && end >= monthStart;
+      })
+      .sort((a, b) => (a.start || a.start_date).localeCompare(b.start || b.start_date));
+
+    if (countEl) countEl.textContent = monthEvents.length > 0
+      ? `${monthEvents.length} événement${monthEvents.length > 1 ? 's' : ''}` : '';
+
+    if (monthEvents.length === 0) {
+      contentEl.innerHTML = '<p style="font-size:.82rem;color:var(--clr-text-muted);text-align:center;padding:8px 0;">Aucun événement ce mois.</p>';
+      return;
+    }
+
+    const typeConfig = {
+      reservation: { bg: '#FF5A5F18', color: '#FF5A5F', label: 'Réservation' },
+      reserved:    { bg: '#3B82F618', color: '#3B82F6', label: 'iCal' },
+      blocked:     { bg: '#6B728018', color: '#6B7280', label: 'Bloqué' },
+      maintenance: { bg: '#F59E0B18', color: '#B06000', label: 'Maintenance' },
+    };
+
+    contentEl.innerHTML = monthEvents.map(ev => {
+      const evType = ev.type || ev.status || 'blocked';
+      const cfg   = typeConfig[evType] || typeConfig.blocked;
+      const title = ev.title || ev.summary || cfg.label;
+      const start = ev.start || ev.start_date;
+      const end   = ev.end   || ev.end_date;
+      const fmt   = (s) => new Date(s + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      return `<div class="cal-mobile-event-item" style="background:${cfg.bg};border-left:3px solid ${cfg.color};">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+          <strong style="font-size:.82rem;color:${cfg.color};">${escapeHtml(title)}</strong>
+          <span style="font-size:.68rem;font-weight:600;color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.color}40;padding:1px 7px;border-radius:999px;">${cfg.label}</span>
+        </div>
+        <div style="font-size:.75rem;color:var(--clr-text-muted);">${fmt(start)} → ${fmt(end)}</div>
+      </div>`;
+    }).join('');
   }
 
   // ================================================================

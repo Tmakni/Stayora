@@ -1,369 +1,435 @@
 ﻿<!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Connectez-vous a votre agent IA Airbnb - reponses automatiques personnalisees pour vos logements.">
-  <title>Connexion - HostAI</title>
+  <meta name="description" content="Connectez-vous à Stayora — votre assistant IA pour gérer vos logements Airbnb avec précision.">
+  <title>Connexion — Stayora</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body.auth-body {
+      min-height: 100vh;
+      background: #06071A;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+    .auth-bg {
+      position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+    }
+    .auth-bg-orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(100px);
+    }
+    .auth-bg-orb-1 {
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, #5B5EF4 0%, transparent 70%);
+      top: -200px; left: -150px; opacity: .18;
+      animation: orbFloat 10s ease-in-out infinite;
+    }
+    .auth-bg-orb-2 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, #7C3AED 0%, transparent 70%);
+      bottom: -150px; right: -100px; opacity: .14;
+      animation: orbFloat 12s ease-in-out infinite reverse;
+    }
+    .auth-bg-orb-3 {
+      width: 350px; height: 350px;
+      background: radial-gradient(circle, #0EA5E9 0%, transparent 70%);
+      top: 40%; left: 55%; opacity: .10;
+      animation: orbFloat 9s ease-in-out infinite 3s;
+    }
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33%       { transform: translate(30px, -40px) scale(1.05); }
+      66%       { transform: translate(-20px, 20px) scale(0.97); }
+    }
+    .auth-bg-grid {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    .auth-badge {
+      position: relative; z-index: 10; margin-bottom: 28px;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 100px;
+      border: 1px solid rgba(99,102,241,.35);
+      background: rgba(99,102,241,.08);
+      font-size: .72rem; font-weight: 600; letter-spacing: .05em;
+      color: #A5B4FC; text-transform: uppercase;
+      backdrop-filter: blur(8px);
+    }
+    .auth-badge-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #6366F1; box-shadow: 0 0 8px #6366F1;
+      animation: dotpulse 2s ease-in-out infinite;
+    }
+    @keyframes dotpulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .6; transform: scale(1.3); }
+    }
+    .auth-card {
+      position: relative; z-index: 10;
+      width: 100%; max-width: 420px;
+      padding: 40px 36px 32px; border-radius: 20px;
+      background: rgba(255,255,255,.035);
+      border: 1px solid rgba(255,255,255,.1);
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: 0 0 0 1px rgba(99,102,241,.08), 0 24px 64px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
+      animation: cardIn .45s cubic-bezier(.16,1,.3,1) both;
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(20px) scale(.98); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .auth-card-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; }
+    .auth-card-logo img { width: 40px; height: 40px; flex-shrink: 0; }
+    .auth-card-logo-name { font-size: 1.25rem; font-weight: 800; color: #fff; letter-spacing: -.04em; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
+    .auth-card-logo-tag { font-size: .62rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.28); margin-top: 1px; }
+    .auth-card-title { font-size: 1.55rem; font-weight: 800; color: #fff; letter-spacing: -.045em; margin-bottom: 6px; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; line-height: 1.2; }
+    .auth-card-subtitle { font-size: .855rem; color: rgba(255,255,255,.42); margin-bottom: 26px; line-height: 1.65; }
+    .auth-alert { padding: 11px 14px; border-radius: 10px; font-size: .825rem; font-weight: 500; margin-bottom: 16px; display: none; }
+    .auth-alert.visible { display: block; }
+    .auth-alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.28); color: #FCA5A5; }
+    .auth-field { margin-bottom: 16px; }
+    .auth-field label { display: block; font-size: .78rem; font-weight: 600; color: rgba(255,255,255,.5); margin-bottom: 7px; text-transform: uppercase; letter-spacing: .05em; }
+    .auth-input-wrap { position: relative; }
+    .auth-field input {
+      width: 100%; padding: 11px 14px; border-radius: 10px;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+      color: #fff; font-size: .925rem; outline: none;
+      transition: border-color .18s, background .18s, box-shadow .18s;
+    }
+    .auth-field input::placeholder { color: rgba(255,255,255,.22); }
+    .auth-field input:focus { border-color: #6366F1; background: rgba(99,102,241,.08); box-shadow: 0 0 0 3px rgba(99,102,241,.2); }
+    .auth-field-error { font-size: .72rem; color: #FCA5A5; margin-top: 5px; display: none; }
+    .auth-field-error.visible { display: block; }
+    .auth-pw-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: rgba(255,255,255,.3); padding: 4px; display: flex; align-items: center; justify-content: center; transition: color .15s; }
+    .auth-pw-toggle:hover { color: rgba(255,255,255,.7); }
+    .auth-pw-toggle svg { width: 16px; height: 16px; }
+    .auth-btn {
+      width: 100%; padding: 13px; border-radius: 11px; border: none; cursor: pointer;
+      font-size: .95rem; font-weight: 700; color: #fff; letter-spacing: -.01em;
+      background: linear-gradient(135deg, #5B5EF4 0%, #818CF8 100%);
+      box-shadow: 0 4px 24px rgba(99,102,241,.4), inset 0 1px 0 rgba(255,255,255,.15);
+      transition: transform .15s, box-shadow .15s, opacity .15s;
+      margin-top: 8px; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    }
+    .auth-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(99,102,241,.55); }
+    .auth-btn:active:not(:disabled) { transform: translateY(0); }
+    .auth-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .auth-social-proof { display: flex; align-items: center; gap: 8px; margin-top: 22px; justify-content: center; }
+    .auth-avatars { display: flex; }
+    .auth-avatar-img { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,.15); margin-left: -8px; font-size: .6rem; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
+    .auth-avatar-img:first-child { margin-left: 0; }
+    .auth-social-text { font-size: .73rem; color: rgba(255,255,255,.38); }
+    .auth-social-text strong { color: rgba(255,255,255,.65); }
+    .auth-switch { margin-top: 18px; text-align: center; font-size: .8125rem; color: rgba(255,255,255,.35); }
+    .auth-switch a { color: #818CF8; font-weight: 600; text-decoration: none; }
+    .auth-switch a:hover { color: #A5B4FC; }
+    .auth-demo { margin-top: 10px; text-align: center; font-size: .7rem; color: rgba(255,255,255,.2); }
+    .auth-airbnb-box { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); }
+    .auth-airbnb-box > label { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: .875rem; font-weight: 600; color: rgba(255,255,255,.8); }
+    .auth-airbnb-box > label input[type=checkbox] { width: 16px; height: 16px; accent-color: #6366F1; cursor: pointer; }
+    .auth-airbnb-box p { font-size: .76rem; color: rgba(255,255,255,.35); margin-top: 7px; }
+    .auth-airbnb-sub { margin-top: 12px; }
+    .auth-airbnb-sub label { font-size: .75rem; color: rgba(255,255,255,.45); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .auth-airbnb-sub input { width: 100%; padding: 9px 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: #fff; font-size: .85rem; outline: none; }
+    .auth-airbnb-sub input:focus { border-color: #6366F1; }
+    .auth-airbnb-sub span { font-size: .68rem; color: rgba(255,255,255,.25); margin-top: 4px; display: block; }
+    .auth-progress-box { margin-top: 16px; padding: 24px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); text-align: center; }
+    .auth-progress-box p { font-size: .875rem; font-weight: 600; color: rgba(255,255,255,.8); margin: 10px 0 4px; }
+    .auth-progress-box small { font-size: .76rem; color: rgba(255,255,255,.35); }
+    .auth-footer-stats { position: relative; z-index: 10; display: flex; align-items: center; gap: 24px; margin-top: 28px; }
+    .auth-footer-stat { text-align: center; }
+    .auth-footer-stat-value { display: block; font-size: .9rem; font-weight: 800; color: rgba(255,255,255,.7); font-family: 'Plus Jakarta Sans', sans-serif; }
+    .auth-footer-stat-label { font-size: .65rem; color: rgba(255,255,255,.28); text-transform: uppercase; letter-spacing: .06em; }
+    .auth-footer-divider { width: 1px; height: 26px; background: rgba(255,255,255,.12); }
+    .spin { display: inline-block; width: 26px; height: 26px; border: 3px solid rgba(255,255,255,.15); border-top-color: #6366F1; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 480px) { .auth-card { padding: 28px 20px 24px; border-radius: 16px; } .auth-footer-stats { display: none; } .auth-badge { display: none; } }
+  </style>
 </head>
-<body>
-  <a href="#main-content" class="skip-link">Aller au contenu principal</a>
+<body class="auth-body">
+  <a href="#main-content" class="skip-link" style="position:absolute;left:-9999px">Aller au contenu principal</a>
 
-  <main class="auth-page" id="main-content">
-    <!-- Hero side -->
-    <aside class="auth-hero" aria-hidden="true">
-      <div class="auth-hero-icon">AI</div>
-      <h1>HostAI</h1>
-      <p>Une experience pro pour gerer vos messages voyageurs avec precision, rapidite et constance.</p>
+  <div class="auth-bg" aria-hidden="true">
+    <div class="auth-bg-orb auth-bg-orb-1"></div>
+    <div class="auth-bg-orb auth-bg-orb-2"></div>
+    <div class="auth-bg-orb auth-bg-orb-3"></div>
+  </div>
+  <div class="auth-bg-grid" aria-hidden="true"></div>
 
-      <div class="auth-hero-features">
-        <div class="auth-hero-feature">
-          <span class="feat-icon"><i data-lucide="brain"></i></span>
-          <span>IA adaptee a chaque logement</span>
-        </div>
-        <div class="auth-hero-feature">
-          <span class="feat-icon"><i data-lucide="zap"></i></span>
-          <span>Reponses claires en quelques secondes</span>
-        </div>
-        <div class="auth-hero-feature">
-          <span class="feat-icon"><i data-lucide="link"></i></span>
-          <span>Connecte a Airbnb et vos integrations</span>
-        </div>
-        <div class="auth-hero-feature">
-          <span class="feat-icon"><i data-lucide="history"></i></span>
-          <span>Historique propre, centralise et actionnable</span>
+  <main id="main-content" style="display:flex;flex-direction:column;align-items:center;padding:24px 16px;">
+
+    <div class="auth-badge" aria-hidden="true">
+      <span class="auth-badge-dot"></span>
+      Plateforme disponible &amp; opérationnelle
+    </div>
+
+    <div class="auth-card">
+      <div class="auth-card-logo">
+        <img src="logo.svg" alt="Stayora" width="40" height="40">
+        <div>
+          <div class="auth-card-logo-name">Stayora</div>
+          <div class="auth-card-logo-tag">Gestion locative IA</div>
         </div>
       </div>
-    </aside>
 
-    <!-- Form side -->
-    <section class="auth-form-side">
-      <div style="max-width:400px; width:100%; margin:0 auto;">
-        <div class="auth-form-header">
-          <h2 id="form-title">Bon retour </h2>
-          <p id="form-subtitle">Connectez-vous pour acceder a votre tableau de bord.</p>
+      <h1 class="auth-card-title" id="form-title">Bon retour 👋</h1>
+      <p class="auth-card-subtitle" id="form-subtitle">Connectez-vous pour accéder à votre tableau de bord.</p>
+
+      <div id="error-message" class="auth-alert auth-alert-error" role="alert" aria-live="polite"></div>
+
+      <form id="auth-form" novalidate>
+        <div class="auth-field">
+          <label for="email">Adresse email</label>
+          <div class="auth-input-wrap">
+            <input type="email" id="email" name="email" required autocomplete="email" placeholder="vous@exemple.com" aria-describedby="email-error">
+          </div>
+          <div id="email-error" class="auth-field-error" aria-live="polite"></div>
         </div>
-
-        <div id="error-message" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
-        <div id="success-message" class="alert alert-success hidden" role="alert" aria-live="polite"></div>
-
-        <form id="auth-form" novalidate>
-          <div class="form-group">
-            <label for="email">Adresse email</label>
-            <input
-              type="email" id="email" name="email"
-              required autocomplete="email"
-              placeholder="vous@exemple.com"
-              aria-describedby="email-error"
-            >
-            <span id="email-error" class="form-error hidden" aria-live="polite"></span>
+        <div class="auth-field">
+          <label for="password">Mot de passe</label>
+          <div class="auth-input-wrap">
+            <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••" aria-describedby="password-error" style="padding-right:40px;">
+            <button type="button" id="toggle-pw" class="auth-pw-toggle" aria-label="Afficher/masquer le mot de passe">
+              <i data-lucide="eye" id="pw-icon"></i>
+            </button>
           </div>
+          <div id="password-error" class="auth-field-error" aria-live="polite"></div>
+        </div>
+        <button type="submit" class="auth-btn" id="submit-btn">Se connecter</button>
+      </form>
 
-          <div class="form-group">
-            <label for="password">Mot de passe</label>
-            <div style="position:relative;">
-              <input
-                type="password" id="password" name="password"
-                required autocomplete="current-password"
-                placeholder=""
-                aria-describedby="password-error"
-                style="padding-right:46px;"
-              >
-              <button
-                type="button" id="toggle-pw"
-                class="btn btn-ghost btn-icon btn-sm"
-                style="position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:6px;"
-                aria-label="Afficher/masquer le mot de passe"
-              ></button>
-            </div>
-            <span id="password-error" class="form-error hidden" aria-live="polite"></span>
-          </div>
-
-          <button type="submit" class="btn btn-primary btn-full btn-lg" id="submit-btn" style="margin-top:8px;">
-            Se connecter
-          </button>
-        </form>
-
-        <!-- Airbnb link section (visible during registration only) -->
-        <div id="airbnb-link-section" class="hidden" style="margin-top:16px;">
-          <div style="border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:16px;background:var(--clr-surface);">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.9rem;font-weight:600;color:var(--clr-text);">
-              <input type="checkbox" id="link-airbnb-check" style="width:18px;height:18px;accent-color:var(--clr-primary);">
-              Lier mon compte Airbnb
-            </label>
-            <p style="font-size:.78rem;color:var(--clr-text-muted);margin-top:6px;margin-bottom:0;">
-              Importez automatiquement tous vos logements depuis Airbnb.
-            </p>
-            <div id="airbnb-url-section" class="hidden" style="margin-top:12px;">
-              <label for="airbnb-profile-url" style="font-size:.82rem;font-weight:500;margin-bottom:4px;display:block;color:var(--clr-text);">URL de votre profil hôte Airbnb</label>
-              <input
-                type="url" id="airbnb-profile-url"
-                placeholder="https://www.airbnb.fr/users/show/123456789"
-                style="width:100%;padding:10px 12px;border:1px solid var(--clr-border);border-radius:var(--radius-sm);font-size:.88rem;"
-              >
-              <span style="font-size:.72rem;color:var(--clr-text-light);display:block;margin-top:4px;">
-                Trouvez-le dans Airbnb → votre photo de profil → «&nbsp;Voir le profil&nbsp;»
-              </span>
-            </div>
+      <div id="airbnb-link-section" class="hidden">
+        <div class="auth-airbnb-box">
+          <label>
+            <input type="checkbox" id="link-airbnb-check">
+            Importer mes logements Airbnb
+          </label>
+          <p>Synchronisez automatiquement tous vos logements depuis votre profil.</p>
+          <div id="airbnb-url-section" class="auth-airbnb-sub hidden">
+            <label for="airbnb-profile-url">URL profil hôte Airbnb</label>
+            <input type="url" id="airbnb-profile-url" placeholder="https://www.airbnb.fr/users/show/123456789">
+            <span>Airbnb → votre photo → « Voir le profil »</span>
           </div>
         </div>
-
-        <!-- Import progress overlay -->
-        <div id="import-progress-overlay" class="hidden" style="margin-top:16px;">
-          <div style="border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:20px;background:var(--clr-surface);text-align:center;">
-            <div id="import-progress-spinner" style="margin:0 auto 12px;">
-              <span class="spinner" style="width:28px;height:28px;border-width:3px;display:inline-block;"></span>
-            </div>
-            <p id="import-progress-text" style="font-size:.88rem;font-weight:500;color:var(--clr-text);margin:0;">Importation en cours…</p>
-            <div id="import-progress-detail" style="font-size:.78rem;color:var(--clr-text-muted);margin-top:6px;"></div>
-          </div>
-        </div>
-
-        <div class="auth-switch">
-          <span id="switch-text">Pas encore de compte ?</span>
-          <a href="#" id="switch-link"> Creer un compte</a>
-        </div>
-
-        <p class="auth-switch" style="margin-top:12px;font-size:.78rem;color:var(--clr-text-light);">
-          Compte demo : demo@hostai.com / demo1234
-        </p>
       </div>
-    </section>
+
+      <div id="import-progress-overlay" class="hidden">
+        <div class="auth-progress-box">
+          <div id="import-progress-spinner"><span class="spin"></span></div>
+          <p id="import-progress-text">Importation en cours…</p>
+          <small id="import-progress-detail"></small>
+        </div>
+      </div>
+
+      <p class="auth-switch">
+        <span id="switch-text">Pas encore de compte ?</span>
+        <a href="#" id="switch-link"> Créer un compte</a>
+      </p>
+
+      <div class="auth-social-proof">
+        <div class="auth-avatars">
+          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#6366F1,#818CF8);">ML</div>
+          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#0EA5E9,#38BDF8);">JD</div>
+          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#7C3AED,#A78BFA);">SR</div>
+          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#10B981,#34D399);">AK</div>
+        </div>
+        <p class="auth-social-text"><strong>2 400+ hôtes</strong> gèrent leurs logements avec Stayora</p>
+      </div>
+
+      <p class="auth-demo">Démo : demo@stayora.com / demo1234</p>
+    </div>
+
+    <div class="auth-footer-stats" aria-hidden="true">
+      <div class="auth-footer-stat">
+        <span class="auth-footer-stat-value">1.2M+</span>
+        <span class="auth-footer-stat-label">Messages traités</span>
+      </div>
+      <div class="auth-footer-divider"></div>
+      <div class="auth-footer-stat">
+        <span class="auth-footer-stat-value">98%</span>
+        <span class="auth-footer-stat-label">Satisfaction</span>
+      </div>
+      <div class="auth-footer-divider"></div>
+      <div class="auth-footer-stat">
+        <span class="auth-footer-stat-value">&lt; 5s</span>
+        <span class="auth-footer-stat-label">Réponse IA</span>
+      </div>
+    </div>
+
   </main>
 
-  <!-- Toast container -->
   <div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
 
   <script>
-    const form        = document.getElementById('auth-form');
-    const formTitle   = document.getElementById('form-title');
-    const formSubtitle= document.getElementById('form-subtitle');
-    const errorDiv    = document.getElementById('error-message');
-    const submitBtn   = document.getElementById('submit-btn');
-    const switchLink  = document.getElementById('switch-link');
-    const switchText  = document.getElementById('switch-text');
-    const togglePw    = document.getElementById('toggle-pw');
-    const pwInput     = document.getElementById('password');
-
+    const form         = document.getElementById('auth-form');
+    const formTitle    = document.getElementById('form-title');
+    const formSubtitle = document.getElementById('form-subtitle');
+    const errorDiv     = document.getElementById('error-message');
+    const submitBtn    = document.getElementById('submit-btn');
+    const switchLink   = document.getElementById('switch-link');
+    const switchText   = document.getElementById('switch-text');
+    const togglePw     = document.getElementById('toggle-pw');
+    const pwInput      = document.getElementById('password');
     let isRegister = false;
 
-    // Show/hide password
     togglePw.addEventListener('click', () => {
       const isHidden = pwInput.type === 'password';
-      pwInput.type  = isHidden ? 'text' : 'password';
-      togglePw.textContent = isHidden ? '' : '';
+      pwInput.type = isHidden ? 'text' : 'password';
+      const icon = document.getElementById('pw-icon');
+      icon.setAttribute('data-lucide', isHidden ? 'eye-off' : 'eye');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
     });
 
-    // Toggle Airbnb link checkbox
     document.getElementById('link-airbnb-check').addEventListener('change', function() {
       document.getElementById('airbnb-url-section').classList.toggle('hidden', !this.checked);
     });
 
-    // Switch mode
     switchLink.addEventListener('click', (e) => {
       e.preventDefault();
       isRegister = !isRegister;
-      errorDiv.classList.add('hidden');
-
+      errorDiv.classList.remove('visible');
       if (isRegister) {
-        formTitle.textContent = 'Creer un compte ';
+        formTitle.textContent = 'Créer un compte 🚀';
         formSubtitle.textContent = 'Commencez gratuitement, sans carte bancaire.';
         submitBtn.textContent = "S'inscrire";
-        switchText.textContent = 'Deja un compte ?';
+        switchText.textContent = 'Déjà un compte ?';
         switchLink.textContent = ' Se connecter';
         pwInput.autocomplete = 'new-password';
         document.getElementById('airbnb-link-section').classList.remove('hidden');
       } else {
-        formTitle.textContent = 'Bon retour ';
-        formSubtitle.textContent = 'Connectez-vous pour acceder a votre tableau de bord.';
+        formTitle.textContent = 'Bon retour 👋';
+        formSubtitle.textContent = 'Connectez-vous pour accéder à votre tableau de bord.';
         submitBtn.textContent = 'Se connecter';
         switchText.textContent = 'Pas encore de compte ?';
-        switchLink.textContent = ' Creer un compte';
+        switchLink.textContent = ' Créer un compte';
         pwInput.autocomplete = 'current-password';
         document.getElementById('airbnb-link-section').classList.add('hidden');
       }
     });
 
-    // Form submit
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearErrors();
-
       const email    = document.getElementById('email').value.trim();
       const password = pwInput.value;
       let valid = true;
-
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        showFieldError('email-error', 'Veuillez entrer un email valide.');
-        valid = false;
-      }
-      if (!password || password.length < 6) {
-        showFieldError('password-error', 'Minimum 6 caracteres.');
-        valid = false;
-      }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showFieldError('email-error', 'Veuillez entrer un email valide.'); valid = false; }
+      if (!password || password.length < 6) { showFieldError('password-error', 'Minimum 6 caractères.'); valid = false; }
       if (!valid) return;
-
       setLoading(true);
-
       try {
         const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-        const res  = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
+        const res  = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
         const data = await res.json();
-
         if (!res.ok) throw new Error(data.error || 'Une erreur est survenue');
-
         localStorage.setItem('token', data.token);
         localStorage.setItem('user_email', data.user.email);
-
-        // Check if user wants to link Airbnb
         const airbnbCheck = document.getElementById('link-airbnb-check');
-        const airbnbUrl = document.getElementById('airbnb-profile-url')?.value?.trim();
-
+        const airbnbUrl   = document.getElementById('airbnb-profile-url')?.value?.trim();
         if (isRegister && airbnbCheck?.checked && airbnbUrl) {
           showToast('success', 'Compte créé ! Importation de vos logements…');
           setLoading(false);
           await autoImportAirbnbListings(data.token, airbnbUrl);
         } else {
-          showToast('success', isRegister ? 'Compte cree ! Redirection...' : 'Connexion reussie !');
+          showToast('success', isRegister ? 'Compte créé ! Redirection...' : 'Connexion réussie !');
           setTimeout(() => window.location.href = '/index.html', 900);
         }
       } catch (err) {
         errorDiv.textContent = err.message;
-        errorDiv.classList.remove('hidden');
+        errorDiv.classList.add('visible');
         setLoading(false);
       }
     });
 
     function setLoading(on) {
       submitBtn.disabled = on;
-      submitBtn.textContent = on
-        ? (isRegister ? 'Inscription en cours...' : 'Connexion en cours...')
-        : (isRegister ? "S'inscrire" : 'Se connecter');
+      submitBtn.textContent = on ? (isRegister ? 'Inscription...' : 'Connexion...') : (isRegister ? "S'inscrire" : 'Se connecter');
     }
-
-    function showFieldError(id, msg) {
-      const el = document.getElementById(id);
-      el.textContent = msg;
-      el.classList.remove('hidden');
-    }
-
-    function clearErrors() {
-      errorDiv.classList.add('hidden');
-      document.querySelectorAll('.form-error').forEach(e => e.classList.add('hidden'));
-    }
-
+    function showFieldError(id, msg) { const el = document.getElementById(id); el.textContent = msg; el.classList.add('visible'); }
+    function clearErrors() { errorDiv.classList.remove('visible'); document.querySelectorAll('.auth-field-error').forEach(e => e.classList.remove('visible')); }
     function showToast(type, message) {
       const c = document.getElementById('toast-container');
       const t = document.createElement('div');
-      t.className = `toast toast-${type}`;
-      t.setAttribute('role', 'status');
-      t.textContent = (type === 'success' ? ' ' : ' ') + message;
+      t.className = `toast toast-${type}`; t.setAttribute('role', 'status'); t.textContent = message;
       c.appendChild(t);
       setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, 3000);
     }
 
-    // Already logged in?
     const token = localStorage.getItem('token');
-    if (token) {
-      fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(r => { if (r.ok) window.location.href = '/index.html'; })
-        .catch(() => {});
-    }
+    if (token) { fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => { if (r.ok) window.location.href = '/index.html'; }).catch(() => {}); }
 
-    // Auto-import Airbnb listings after registration
     async function autoImportAirbnbListings(token, profileUrl) {
-      const overlay = document.getElementById('import-progress-overlay');
-      const progressText = document.getElementById('import-progress-text');
+      const overlay        = document.getElementById('import-progress-overlay');
+      const progressText   = document.getElementById('import-progress-text');
       const progressDetail = document.getElementById('import-progress-detail');
-      const form = document.getElementById('auth-form');
-      const airbnbSection = document.getElementById('airbnb-link-section');
-
-      // Hide form, show progress
-      form.style.display = 'none';
-      airbnbSection.style.display = 'none';
+      const formEl         = document.getElementById('auth-form');
+      const airbnbSection  = document.getElementById('airbnb-link-section');
+      formEl.style.display = 'none'; airbnbSection.style.display = 'none';
       overlay.classList.remove('hidden');
-      progressText.textContent = 'Recherche de vos logements Airbnb…';
-      progressDetail.textContent = '';
-
+      progressText.textContent = 'Recherche de vos logements Airbnb…'; progressDetail.textContent = '';
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-
       try {
-        // Step 1: Scan profile
-        const scanRes = await fetch('/api/properties/scan-airbnb-profile', {
-          method: 'POST', headers, body: JSON.stringify({ profileUrl })
-        });
+        const scanRes  = await fetch('/api/properties/scan-airbnb-profile', { method: 'POST', headers, body: JSON.stringify({ profileUrl }) });
         const scanData = await scanRes.json();
-
         if (!scanRes.ok || !scanData.listings?.length) {
-          progressText.textContent = 'Aucun logement trouvé sur ce profil.';
-          progressDetail.textContent = 'Vous pourrez les ajouter manuellement depuis le tableau de bord.';
-          document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="width:28px;height:28px;color:var(--clr-warning);"></i>';
-          setTimeout(() => window.location.href = '/index.html', 2500);
-          return;
+          progressText.textContent = 'Aucun logement trouvé.'; progressDetail.textContent = 'Vous pourrez les ajouter manuellement.';
+          document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="color:#FCA5A5;width:28px;height:28px;"></i>';
+          if (typeof lucide !== 'undefined') lucide.createIcons();
+          setTimeout(() => window.location.href = '/index.html', 2500); return;
         }
-
         const total = scanData.listings.length;
         progressText.textContent = `${total} logement${total > 1 ? 's' : ''} trouvé${total > 1 ? 's' : ''} !`;
         progressDetail.textContent = 'Importation en cours…';
-
-        // Step 2: Import each listing
         let imported = 0;
         for (const listing of scanData.listings) {
           try {
             progressDetail.textContent = `Importation ${imported + 1}/${total}…`;
-
-            const importRes = await fetch('/api/properties/import-airbnb', {
-              method: 'POST', headers, body: JSON.stringify({ url: listing.id })
-            });
+            const importRes  = await fetch('/api/properties/import-airbnb', { method: 'POST', headers, body: JSON.stringify({ url: listing.id }) });
             const importData = await importRes.json();
-
             if (importData.success && importData.data) {
               const d = importData.data;
-              await fetch('/api/properties', {
-                method: 'POST', headers,
-                body: JSON.stringify({
-                  name: d.name, property_type: d.property_type,
-                  bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
-                  address: d.address || '', description: d.description || '', house_rules: d.house_rules || '',
-                  check_in_time: d.check_in_time || '', check_out_time: d.check_out_time || '', nearby: d.nearby || '',
-                  has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
-                  has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
-                  has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning,
-                  has_heating: d.has_heating, has_workspace: d.has_workspace,
-                  has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron,
-                  has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
-                  has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave,
-                  has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
-                  has_smoke_detector: d.has_smoke_detector, has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
-                  has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
-                  has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden,
-                  has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
-                  allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
-                  airbnb_listing_id: d.airbnb_listing_id, auto_reply_enabled: false, reply_tone: 'friendly'
-                })
-              });
+              await fetch('/api/properties', { method: 'POST', headers, body: JSON.stringify({
+                name: d.name, property_type: d.property_type, bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
+                address: d.address || '', description: d.description || '', house_rules: d.house_rules || '',
+                check_in_time: d.check_in_time || '', check_out_time: d.check_out_time || '', nearby: d.nearby || '',
+                has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking, has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
+                has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning, has_heating: d.has_heating, has_workspace: d.has_workspace,
+                has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron, has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
+                has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave, has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
+                has_smoke_detector: d.has_smoke_detector, has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
+                has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
+                has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden, has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
+                allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
+                airbnb_listing_id: d.airbnb_listing_id, auto_reply_enabled: false, reply_tone: 'friendly'
+              }) });
               imported++;
             }
           } catch (_) {}
         }
-
-        // Step 3: Done
-        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="check-circle" style="width:28px;height:28px;color:var(--clr-success);"></i>';
+        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="check-circle" style="color:#34D399;width:28px;height:28px;"></i>';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
         progressText.textContent = `${imported} logement${imported > 1 ? 's' : ''} importé${imported > 1 ? 's' : ''} !`;
         progressDetail.textContent = 'Redirection vers votre tableau de bord…';
         setTimeout(() => window.location.href = '/index.html', 1500);
-
       } catch (err) {
-        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="width:28px;height:28px;color:var(--clr-warning);"></i>';
-        progressText.textContent = 'Erreur lors de l\'importation.';
-        progressDetail.textContent = 'Redirection vers le tableau de bord…';
+        document.getElementById('import-progress-spinner').innerHTML = '<i data-lucide="alert-triangle" style="color:#FCA5A5;width:28px;height:28px;"></i>';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        progressText.textContent = "Erreur lors de l'importation.";
+        progressDetail.textContent = 'Redirection en cours…';
         setTimeout(() => window.location.href = '/index.html', 2000);
       }
     }

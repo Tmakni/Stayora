@@ -1,12 +1,34 @@
 ﻿<!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tableau de bord - HostAI</title>
+  <title>Tableau de bord — Stayora</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <style>
+    /* Index-page mobile improvements */
+    @media (max-width: 900px) {
+      /* Hide verbose section descriptions on mobile — save vertical space */
+      .section-description { display: none; }
+      .section-kicker { display: none; }
+      /* Keep hero eyebrow hidden */
+      .dashboard-hero-eyebrow { display: none; }
+      /* Hero title smaller */
+      .dashboard-hero-title { font-size: 1.1rem !important; }
+      /* Hero metrics: wrap tightly */
+      .dashboard-hero-metrics { gap: 6px; margin-top: 8px; }
+      .hero-metric-pill { font-size: .7rem; padding: 3px 8px; }
+      /* Import Airbnb button: compact on mobile */
+      #import-airbnb-btn span { display: none; }
+    }
+    @media (max-width: 480px) {
+      /* Very small phones: hide hero actions, just show stats */
+      .dashboard-hero-actions { display: none; }
+      .dashboard-hero { padding: 12px; }
+    }
+  </style>
 </head>
 <body>
 <a href="#main-content" class="skip-link">Aller au contenu</a>
@@ -30,7 +52,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">HostAI</span>
+    <span class="mobile-topbar-title">Stayora</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -38,9 +60,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <img src="logo.svg" width="32" height="32" alt="Stayora">
       </div>
-      <span class="sidebar-brand-name">HostAI</span>
+      <span class="sidebar-brand-name">Stayora</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 

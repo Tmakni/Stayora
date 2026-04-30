@@ -1,17 +1,67 @@
 ﻿<!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('hostai-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Conversation - HostAI</title>
+  <title>Conversation — Stayora</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
   <style>
     /* Conversation page overrides */
     .dashboard-main { padding: 28px 32px 40px; }
+
+    /* ── Mobile conversation layout ── */
     @media (max-width: 900px) {
-      .dashboard-main { padding: 14px 12px 80px; }
+      .dashboard-main { padding: 12px 12px 80px; }
+
+      /* Prominent back button on mobile */
+      .conv-back-btn {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 16px;
+        font-size: .82rem;
+        font-weight: 600;
+        color: var(--clr-primary);
+        background: var(--clr-primary-light);
+        border: 1px solid var(--clr-primary);
+        border-radius: 8px;
+        min-height: 40px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      /* Conversation header: stack on mobile */
+      .chat-header {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 10px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--clr-border-subtle);
+        margin-bottom: 12px !important;
+      }
+      .chat-header > div:first-child { width: 100%; }
+
+      /* Title smaller on mobile */
+      #conversation-title { font-size: 1.1rem !important; }
+
+      /* Draft actions: wrap nicely */
+      .draft-actions { flex-wrap: wrap; gap: 8px; }
+      .draft-actions .btn { flex: 1; min-width: 100px; justify-content: center; }
+
+      /* Copy button: prominent on mobile */
+      #copy-btn {
+        background: var(--clr-primary) !important;
+        color: #fff !important;
+        border-color: var(--clr-primary) !important;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .dashboard-main { padding: 10px 10px 80px; }
+      .chat-header { gap: 8px; }
+      .draft-actions .btn { font-size: .78rem; padding: 10px 12px; }
     }
   </style>
 </head>
@@ -26,7 +76,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">HostAI</span>
+    <span class="mobile-topbar-title">Stayora</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -34,9 +84,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <img src="logo.svg" width="32" height="32" alt="Stayora">
       </div>
-      <span class="sidebar-brand-name">HostAI</span>
+      <span class="sidebar-brand-name">Stayora</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 
@@ -94,14 +144,26 @@
           <span class="meta-pill" id="created-meta"></span>
         </div>
       </div>
-      <a href="/index.html" class="btn btn-outline btn-sm" aria-label="Retour au tableau de bord"> Retour</a>
+      <a href="/index.html" class="btn btn-outline btn-sm conv-back-btn" aria-label="Retour à la liste des conversations">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour
+      </a>
     </div>
 
     <!-- Mobile view tabs -->
     <div class="conv-mobile-tabs" id="conv-mobile-tabs">
-      <button class="conv-mobile-tab active" onclick="switchConvTab('chat')">💬 Conversation</button>
-      <button class="conv-mobile-tab" onclick="switchConvTab('info')">📋 Infos</button>
-      <button class="conv-mobile-tab" onclick="switchConvTab('reply')">✈ Répondre</button>
+      <button class="conv-mobile-tab active" onclick="switchConvTab('chat')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:4px;vertical-align:middle;"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        Messages
+      </button>
+      <button class="conv-mobile-tab" onclick="switchConvTab('info')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:4px;vertical-align:middle;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Infos
+      </button>
+      <button class="conv-mobile-tab" onclick="switchConvTab('reply')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:4px;vertical-align:middle;"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Répondre
+      </button>
     </div>
 
     <!-- 2-col layout -->
