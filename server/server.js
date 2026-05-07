@@ -46,7 +46,7 @@ app.use(helmet({
       baseUri: ["'self'"],
       formAction: ["'self'"],
       scriptSrcAttr: ["'unsafe-inline'"],
-      upgradeInsecureRequests: config.isProd ? [] : null,
+      upgradeInsecureRequests: config.isProd ? [] : undefined,
     }
   },
   crossOriginEmbedderPolicy: false,
