@@ -34,11 +34,12 @@ module.exports = {
   },
   database: {
     useMemory: process.env.USE_MEMORY_DB === 'true',
-    host: process.env.DB_HOST || 'localhost',
+    host: process.env.DB_HOST || '',
     port: parseInt(process.env.DB_PORT, 10) || 3306,
-    user: process.env.DB_USER || 'root',
+    user: process.env.DB_USER || '',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'airbnb_ai_agent'
+    database: process.env.DB_NAME || '',
+    ssl: process.env.DB_SSL === 'true'
   },
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000,
