@@ -9,7 +9,7 @@ data/
 .gitignore
 *.sh
 nul
-migrations/
+migrations/*.sql
 README.md
 DELIVERY.md
 API.md
