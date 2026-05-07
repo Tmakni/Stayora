@@ -59,14 +59,22 @@ app.use(helmet({
 }));
 
 // CORS — strict origin control
+// Render auto-sets RENDER_EXTERNAL_URL; APP_URL can override for custom domains
+const _prodOrigins = [
+  process.env.APP_URL,
+  process.env.RENDER_EXTERNAL_URL,
+].filter(Boolean).map(o => o.replace(/\/$/, ''));
 const allowedOrigins = config.isProd
-  ? (process.env.APP_URL ? [process.env.APP_URL] : [])
+  ? (_prodOrigins.length > 0 ? _prodOrigins : null)
   : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://192.168.1.21:3000'];
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow same-origin requests (origin is undefined for server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // Allow server-to-server requests (no Origin header)
+    if (!origin) return cb(null, true);
+    // Fallback: if no origins configured in prod, allow all (prevents lockout on first deploy)
+    if (!allowedOrigins) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
     logger.warn(`CORS blocked origin: ${origin}`);
     cb(new Error('CORS not allowed'));
   },

@@ -201,8 +201,12 @@ async function deactivateAccount(userId, accountId) {
  *   2. For each email thread: extract sender name, subject, message body
  *   3. For Airbnb emails: also extract guest name & match to property
  *   4. Create or update a conversation with sender name and message content
+ *
+ * @param {number} userId
+ * @param {number} accountId
+ * @param {boolean} [forceFullSync=false] — ignore last_sync_at, fetch everything
  */
-async function fetchMessages(userId, accountId) {
+async function fetchMessages(userId, accountId, forceFullSync = false) {
   const account = await getGmailAccount(userId, accountId);
   if (!account) throw new Error('Gmail account not found');
 
@@ -220,30 +224,40 @@ async function fetchMessages(userId, accountId) {
 
     // Fetch ALL Airbnb notification emails (no in:inbox — catches archived/filtered)
     let q = 'from:airbnb';
-    if (account.last_sync_at) {
+    if (!forceFullSync && account.last_sync_at) {
       // 5-minute safety buffer to avoid missing messages during sync gaps
       const safetyBufferSeconds = 300;
       const afterEpoch = Math.floor(new Date(account.last_sync_at).getTime() / 1000) - safetyBufferSeconds;
       q += ` after:${afterEpoch}`;
     }
+    if (forceFullSync) {
+      logger.info(`Gmail sync: FORCE FULL SYNC for account ${accountId} (ignoring last_sync_at)`);
+    }
+    logger.info(`Gmail sync: query = "${q}"`);
 
     // Use threads.list with pagination to fetch ALL matching threads
     let threads = [];
     let pageToken = null;
+    let pageCount = 0;
     do {
       const listResp = await gmail.users.threads.list({
         userId: 'me',
         q,
-        maxResults: 100,
+        maxResults: 200,
         ...(pageToken && { pageToken })
       });
-      threads.push(...(listResp.data.threads || []));
+      const pageThreads = listResp.data.threads || [];
+      threads.push(...pageThreads);
       pageToken = listResp.data.nextPageToken;
+      pageCount++;
+      logger.info(`Gmail sync: page ${pageCount} → ${pageThreads.length} threads (nextPageToken: ${pageToken ? 'yes' : 'no'})`);
     } while (pageToken);
-    logger.info(`Gmail sync: found ${threads.length} threads in inbox for account ${accountId} (query: ${q})`);
+
+    logger.info(`Gmail sync: found ${threads.length} total threads for account ${accountId} (query: "${q}")`);
+
     if (threads.length === 0) {
       await finishSyncLog(db, syncLogId, 0, accountId);
-      return { synced: 0 };
+      return { synced: 0, threads: 0 };
     }
 
     // Load user's properties once for matching
@@ -253,7 +267,6 @@ async function fetchMessages(userId, accountId) {
     );
 
     // Fetch full thread data in parallel batches (each threads.get returns ALL messages)
-    // This replaces N+1 individual message fetches with ~5 batched thread fetches
     const BATCH_SIZE = 5;
     const threadMap = new Map(); // threadId → [gmailMsg, …]
     for (let i = 0; i < threads.length; i += BATCH_SIZE) {
@@ -271,22 +284,28 @@ async function fetchMessages(userId, accountId) {
       for (const res of results) {
         if (!res || !res.data || !res.data.messages) continue;
         const threadId = res.data.id;
+        const msgCount = res.data.messages.length;
+        logger.info(`Gmail sync: thread ${threadId} has ${msgCount} message(s)`);
         threadMap.set(threadId, res.data.messages);
       }
     }
 
+    logger.info(`Gmail sync: loaded ${threadMap.size} threads with full message data`);
+
     let synced = 0;
+    let skipped = 0;
     for (const [threadId, msgs] of threadMap) {
       try {
         const count = await syncGmailThread(userId, accountId, account, gmail, threadId, msgs, properties);
         synced += count;
+        if (count === 0) skipped++;
       } catch (threadErr) {
         logger.warn(`Gmail sync thread ${threadId} failed: ${threadErr.message}`);
       }
     }
 
+    logger.info(`Gmail sync: DONE — ${synced} new messages saved, ${skipped} threads skipped (no new messages)`);
     await finishSyncLog(db, syncLogId, synced, accountId);
-    logger.info(`Gmail sync: ${synced} new messages for account ${accountId}`);
     return { synced, threads: threadMap.size };
   } catch (error) {
     await db.query(
@@ -365,6 +384,7 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
   // Body already fetched (full format from threads.get) — no extra API call needed
   let firstBody = '';
   let airbnbThreadId = null;
+  let airbnbReplyUrl = null;
   try {
     firstBody = extractBody(firstMsg);
     // Try ALL messages to find the Airbnb thread ID.
@@ -372,11 +392,19 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     // a SEPARATE Gmail thread. Any message in any thread may contain the link.
     if (isAirbnb) {
       for (const msg of fullMsgs) {
-        const tid = extractAirbnbThreadIdFromMessage(msg);
-        if (tid) { airbnbThreadId = tid; break; }
+        const result = extractAirbnbThreadIdFromMessage(msg);
+        if (result && result.threadId) {
+          airbnbThreadId = result.threadId;
+          airbnbReplyUrl = result.replyUrl;
+          break;
+        }
       }
     }
-    if (airbnbThreadId) logger.info(`Gmail sync thread ${threadId}: extracted Airbnb thread ID = ${airbnbThreadId}`);
+    if (airbnbThreadId) {
+      logger.info(`Gmail sync thread ${threadId}: Airbnb thread ID extracted = ${airbnbThreadId}, replyUrl = ${airbnbReplyUrl}`);
+    } else if (isAirbnb) {
+      logger.warn(`Gmail sync thread ${threadId}: could NOT extract Airbnb thread ID — will use fallback matching`);
+    }
   } catch (_) {}
 
   // Extract names
@@ -398,11 +426,17 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     dbThreadId = existing[0].id;
     conversationId = existing[0].conversation_id;
 
-    // Backfill airbnb_thread_id if we now have it but it wasn't stored before
+    // Backfill airbnb_thread_id and airbnb_reply_url if we now have them but they weren't stored before
     if (airbnbThreadId) {
       await db.query(
-        'UPDATE conversations SET airbnb_thread_id = ? WHERE id = ? AND (airbnb_thread_id IS NULL OR airbnb_thread_id = "")',
-        [airbnbThreadId, conversationId]
+        'UPDATE conversations SET airbnb_thread_id = ?, airbnb_reply_url = COALESCE(airbnb_reply_url, ?) WHERE id = ? AND (airbnb_thread_id IS NULL OR airbnb_thread_id = "")',
+        [airbnbThreadId, airbnbReplyUrl, conversationId]
+      );
+    } else if (airbnbReplyUrl) {
+      // Store the reply URL even if we couldn't parse a clean thread ID
+      await db.query(
+        'UPDATE conversations SET airbnb_reply_url = ? WHERE id = ? AND (airbnb_reply_url IS NULL OR airbnb_reply_url = "")',
+        [airbnbReplyUrl, conversationId]
       );
     }
 
@@ -436,42 +470,71 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     if (existingConvId) {
       conversationId = existingConvId;
     } else {
-      // Truly new Airbnb conversation — create it
-      let convTitle;
-      if (isAirbnb && matchedProperty) {
-        convTitle = `${displayName} – ${matchedProperty.name}`;
-      } else if (isAirbnb && propertyName) {
-        convTitle = `${displayName} – ${propertyName}`;
-      } else {
-        convTitle = displayName;
+      // ── Fallback: no airbnb_thread_id — try matching by guest name + property ──
+      // This handles cases where the Airbnb URL extraction failed (changed URL format, etc.)
+      if (isAirbnb && displayName && displayName !== senderEmail) {
+        const fallbackConvId = await findExistingConversationFallback(db, userId, displayName, matchedProperty);
+        if (fallbackConvId) {
+          conversationId = fallbackConvId;
+          logger.info(`Gmail sync thread ${threadId}: merged into conversation ${fallbackConvId} via name fallback ("${displayName}")`);
+          // Register this Gmail thread so future syncs find it without fallback
+          const tRes = await db.query(
+            `INSERT INTO gmail_threads (user_id, gmail_account_id, gmail_thread_id, conversation_id, sender_email, sender_name, subject, last_message_at, last_synced_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [userId, accountId, threadId, conversationId, senderEmail, displayName, subject]
+          );
+          dbThreadId = tRes.insertId;
+        }
       }
 
-      const convResult = await db.query(
-        `INSERT INTO conversations (user_id, title, booking_status, property_id, external_id, external_provider, guest_name, guest_language, airbnb_thread_id)
-         VALUES (?, ?, 'inquiry', ?, ?, 'gmail', ?, 'fr', ?)`,
-        [userId, convTitle, matchedProperty ? matchedProperty.id : null, threadId, displayName, airbnbThreadId]
-      );
-      conversationId = convResult.insertId;
-    }
+      if (!conversationId) {
+        // Truly new Airbnb conversation — create it
+        let convTitle;
+        if (isAirbnb && matchedProperty) {
+          convTitle = `${displayName} – ${matchedProperty.name}`;
+        } else if (isAirbnb && propertyName) {
+          convTitle = `${displayName} – ${propertyName}`;
+        } else {
+          convTitle = displayName;
+        }
 
-    // Always register this Gmail thread so future syncs find it instantly
-    const threadResult = await db.query(
-      `INSERT INTO gmail_threads (user_id, gmail_account_id, gmail_thread_id, conversation_id, sender_email, sender_name, subject, last_message_at, last_synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [userId, accountId, threadId, conversationId, senderEmail, displayName, subject]
-    );
-    dbThreadId = threadResult.insertId;
+        const convResult = await db.query(
+          `INSERT INTO conversations (user_id, title, booking_status, property_id, external_id, external_provider, guest_name, guest_language, airbnb_thread_id, airbnb_reply_url)
+           VALUES (?, ?, 'inquiry', ?, ?, 'gmail', ?, 'fr', ?, ?)`,
+          [userId, convTitle, matchedProperty ? matchedProperty.id : null, threadId, displayName, airbnbThreadId, airbnbReplyUrl]
+        );
+        conversationId = convResult.insertId;
+        logger.info(`Gmail sync thread ${threadId}: created new conversation ${conversationId} for "${displayName}"`);
+
+        // Register this Gmail thread so future syncs find it instantly
+        const tRes = await db.query(
+          `INSERT INTO gmail_threads (user_id, gmail_account_id, gmail_thread_id, conversation_id, sender_email, sender_name, subject, last_message_at, last_synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [userId, accountId, threadId, conversationId, senderEmail, displayName, subject]
+        );
+        dbThreadId = tRes.insertId;
+      }
+    }
   }
 
   // Messages already fetched in full format — no extra API calls needed
   const existingMsgIds = await getExistingGmailMessageIds(db, conversationId);
   let newMessages = 0;
+  let duplicates = 0;
+  logger.info(`Gmail sync thread ${threadId}: ${fullMsgs.length} message(s) in thread, ${existingMsgIds.size} already in DB`);
 
   for (const fullMsg of fullMsgs) {
-    if (existingMsgIds.has(fullMsg.id)) continue;
+    if (existingMsgIds.has(fullMsg.id)) {
+      duplicates++;
+      logger.info(`Gmail sync: skipping duplicate message ${fullMsg.id}`);
+      continue;
+    }
 
     const body = extractBody(fullMsg);
-    if (!body.trim()) continue;
+    if (!body.trim()) {
+      logger.info(`Gmail sync: skipping message ${fullMsg.id} — empty body`);
+      continue;
+    }
 
     // For Airbnb emails, extract the guest message; for others, use full body
     let cleanedMessage = isAirbnb
@@ -483,6 +546,7 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       cleanedMessage = body.replace(/\n{3,}/g, '\n\n').trim();
     }
     if (!cleanedMessage.trim()) {
+      logger.info(`Gmail sync: skipping message ${fullMsg.id} — no extractable content`);
       continue;
     }
 
@@ -531,8 +595,11 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       'UPDATE conversations SET updated_at = ? WHERE id = ?',
       [msgDate, conversationId]
     );
+    logger.info(`Gmail sync: saved message ${fullMsg.id} (role=${role}) to conversation ${conversationId}`);
     newMessages++;
   }
+
+  logger.info(`Gmail sync thread ${threadId}: saved ${newMessages} new message(s), skipped ${duplicates} duplicate(s)`);
 
   // After inserting new messages, extract Q&A pairs from this conversation
   // so the AI can use them for future guests of the same property
@@ -567,44 +634,214 @@ async function getExistingGmailMessageIds(db, conversationId) {
 }
 
 /**
- * Extract the Airbnb conversation thread ID from a Gmail message's raw HTML.
- * Airbnb notification emails contain a direct link such as:
- *   https://www.airbnb.com/hosting/inbox/thread/1234567890
- * We extract the numeric thread ID from that URL.
+ * Fallback conversation matching when airbnb_thread_id extraction fails.
+ * Tries to find an existing conversation for the same guest name (+ property if known).
+ * Only matches conversations created within the last 90 days to avoid false positives.
+ */
+async function findExistingConversationFallback(db, userId, guestName, matchedProperty) {
+  if (!guestName) return null;
+
+  const normalizedName = guestName.trim().toLowerCase();
+
+  // Build query — if we know the property, constrain to it for higher confidence
+  let rows;
+  if (matchedProperty) {
+    rows = await db.query(
+      `SELECT id, guest_name FROM conversations
+       WHERE user_id = ? AND property_id = ?
+         AND external_provider = 'gmail'
+         AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+       ORDER BY updated_at DESC LIMIT 20`,
+      [userId, matchedProperty.id]
+    );
+  } else {
+    rows = await db.query(
+      `SELECT id, guest_name FROM conversations
+       WHERE user_id = ?
+         AND external_provider = 'gmail'
+         AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+       ORDER BY updated_at DESC LIMIT 40`,
+      [userId]
+    );
+  }
+
+  for (const row of rows) {
+    if (!row.guest_name) continue;
+    const existing = row.guest_name.trim().toLowerCase();
+    // Exact match
+    if (existing === normalizedName) return row.id;
+    // First-name-only match (both must have at least 3 chars)
+    const existingFirst = existing.split(' ')[0];
+    const newFirst = normalizedName.split(' ')[0];
+    if (existingFirst.length >= 3 && existingFirst === newFirst) return row.id;
+  }
+
+  return null;
+}
+
+/**
+ * Extract the Airbnb conversation thread ID from a Gmail message.
+ * Also returns the best direct Airbnb reply URL found.
+ *
+ * Returns: { threadId: string|null, replyUrl: string|null }
+ *
+ * Sources tried in order:
+ *  1. Email headers (X-Airbnb-Thread-ID, References, Message-ID)
+ *  2. Decoded tracking redirect URLs (url=, redirect=, upn= params)
+ *  3. Direct HTML body — /hosting/inbox/thread/<id>
+ *  4. Percent-encoded variants of the above
+ *  5. HTML body — /z/q/<id>, /messaging/thread/<id>, abnb.me links, etc.
+ *  6. Subject line — long numeric ID pattern
  */
 function extractAirbnbThreadIdFromMessage(gmailMessageData) {
   const payload = gmailMessageData.payload;
-  if (!payload) return null;
+  if (!payload) return { threadId: null, replyUrl: null };
 
+  // ── Strategy 1: check email headers ──
+  const hdrs = parseHeaders(gmailMessageData);
+  const refsHeader = hdrs['references'] || hdrs['in-reply-to'] || '';
+  const threadHeaderMatch = refsHeader.match(/thread[_\-/](\d{8,})/i);
+  if (threadHeaderMatch) {
+    const tid = threadHeaderMatch[1];
+    return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+  }
+
+  // ── Collect all raw text (HTML + plain) ──
   let htmlContent = null;
+  let plainContent = null;
 
-  function findHtml(parts) {
+  function findParts(parts) {
     for (const part of (parts || [])) {
-      if (part.mimeType === 'text/html' && part.body && part.body.data) {
+      if (part.mimeType === 'text/html' && part.body && part.body.data && !htmlContent) {
         htmlContent = Buffer.from(
-          part.body.data.replace(/-/g, '+').replace(/_/g, '/'),
-          'base64'
+          part.body.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64'
         ).toString('utf8');
-        return;
       }
-      if (part.parts) findHtml(part.parts);
+      if (part.mimeType === 'text/plain' && part.body && part.body.data && !plainContent) {
+        plainContent = Buffer.from(
+          part.body.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64'
+        ).toString('utf8');
+      }
+      if (part.parts) findParts(part.parts);
     }
   }
 
   if (payload.mimeType === 'text/html' && payload.body && payload.body.data) {
     htmlContent = Buffer.from(
-      payload.body.data.replace(/-/g, '+').replace(/_/g, '/'),
-      'base64'
+      payload.body.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64'
+    ).toString('utf8');
+  } else if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) {
+    plainContent = Buffer.from(
+      payload.body.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64'
     ).toString('utf8');
   } else {
-    findHtml(payload.parts);
+    findParts(payload.parts);
   }
 
-  if (!htmlContent) return null;
+  // ── Helper: search a text blob for Airbnb thread ID + URL ──
+  function searchContent(text) {
+    if (!text) return null;
 
-  // Match airbnb.com or airbnb.fr thread URL
-  const match = htmlContent.match(/https?:\/\/(?:www\.)?airbnb\.[a-z.]{2,6}\/hosting\/inbox\/thread\/(\d+)/i);
-  return match ? match[1] : null;
+    // Step A: decode any tracking redirect params (url=, redirect=, to=, dest=)
+    // Airbnb emails wrap links: href="https://email.airbnb.com/ls/click?upn=...&url=https%3A%2F%2F..."
+    const redirectParamRe = /[?&](?:url|redirect|to|dest|link)=([^&"'\s]{20,})/gi;
+    let rdMatch;
+    while ((rdMatch = redirectParamRe.exec(text)) !== null) {
+      try {
+        const decoded = decodeURIComponent(rdMatch[1]);
+        const found = searchRawUrl(decoded);
+        if (found) return found;
+      } catch (_) {}
+    }
+
+    // Step B: look for percent-encoded Airbnb paths directly in text
+    // e.g. %2Fhosting%2Finbox%2Fthread%2F12345
+    const pctInbox = text.match(/%2Fhosting%2Finbox%2Fthread%2F(\d+)/i);
+    if (pctInbox) {
+      const tid = pctInbox[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+    const pctMsg = text.match(/%2Fmessaging%2Fthread%2F(\d+)/i);
+    if (pctMsg) {
+      const tid = pctMsg[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/messaging/thread/${tid}` };
+    }
+
+    // Step C: plain URL patterns
+    return searchRawUrl(text);
+  }
+
+  function searchRawUrl(text) {
+    if (!text) return null;
+
+    // /hosting/inbox/thread/<id>  (desktop, app, fr + com)
+    let m = text.match(/\/hosting\/inbox(?:\/thread)?\/(\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // /messaging/thread/<id>  or  /messaging/ajax_messaging_thread?thread_id=<id>
+    m = text.match(/\/messaging\/(?:thread|ajax_messaging_thread)[\/?](\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // ?thread_id=<id>
+    m = text.match(/[?&]thread_id=(\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // /z/q/<id>  (mobile short link)
+    m = text.match(/airbnb\.[a-z]{2,6}\/z\/q\/(\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // abnb.me/<path>/<id>
+    m = text.match(/abnb\.me\/[^"'\s]*?\/(\d{8,})/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // /inquiries/<id>  (older format)
+    m = text.match(/\/inquiries\/(\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    // Any numeric ID (8+ digits) embedded in an airbnb URL
+    m = text.match(/airbnb\.[a-z]{2,6}\/[^"'\s]*?\/(\d{8,})/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    }
+
+    return null;
+  }
+
+  // ── Strategy 2 & 3: Search HTML, then plain text ──
+  const htmlResult = searchContent(htmlContent);
+  if (htmlResult) return htmlResult;
+
+  const plainResult = searchContent(plainContent);
+  if (plainResult) return plainResult;
+
+  // ── Strategy 4: check subject for long numeric ID ──
+  const subject = hdrs.subject || '';
+  const subjMatch = subject.match(/\b(\d{10,})\b/);
+  if (subjMatch) {
+    const tid = subjMatch[1];
+    return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+  }
+
+  return { threadId: null, replyUrl: null };
 }
 
 /**

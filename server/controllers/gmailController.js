@@ -250,7 +250,12 @@ async function removeAccount(req, res) {
 async function syncMessages(req, res) {
   try {
     const accountId = parseInt(req.params.accountId);
-    const result = await gmailSync.fetchMessages(req.userId, accountId);
+    // ?force=true → ignore last_sync_at, re-fetch everything (useful to recover missed messages)
+    const forceFullSync = req.query.force === 'true' || req.body?.force === true;
+    if (forceFullSync) {
+      logger.info(`Gmail force full sync requested for account ${accountId} by user ${req.userId}`);
+    }
+    const result = await gmailSync.fetchMessages(req.userId, accountId, forceFullSync);
     await logAudit(req, 'gmail_sync_messages', 'gmail_account', accountId);
 
     return res.json({

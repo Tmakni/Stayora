@@ -1,199 +1,107 @@
 ﻿<!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Connectez-vous à Stayora — votre assistant IA pour gérer vos logements Airbnb avec précision.">
-  <title>Connexion — Stayora</title>
+  <meta name="description" content="Connectez-vous à Michel — votre assistant IA pour la gestion locative.">
+  <title>Connexion — Michel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body.auth-body {
-      min-height: 100vh;
-      background: #06071A;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-family: 'Inter', system-ui, sans-serif;
-      overflow: hidden;
-      position: relative;
-    }
-    .auth-bg {
-      position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
-    }
-    .auth-bg-orb {
-      position: absolute; border-radius: 50%;
-      filter: blur(100px);
-    }
-    .auth-bg-orb-1 {
-      width: 600px; height: 600px;
-      background: radial-gradient(circle, #5B5EF4 0%, transparent 70%);
-      top: -200px; left: -150px; opacity: .18;
-      animation: orbFloat 10s ease-in-out infinite;
-    }
-    .auth-bg-orb-2 {
-      width: 500px; height: 500px;
-      background: radial-gradient(circle, #7C3AED 0%, transparent 70%);
-      bottom: -150px; right: -100px; opacity: .14;
-      animation: orbFloat 12s ease-in-out infinite reverse;
-    }
-    .auth-bg-orb-3 {
-      width: 350px; height: 350px;
-      background: radial-gradient(circle, #0EA5E9 0%, transparent 70%);
-      top: 40%; left: 55%; opacity: .10;
-      animation: orbFloat 9s ease-in-out infinite 3s;
-    }
-    @keyframes orbFloat {
-      0%, 100% { transform: translate(0, 0) scale(1); }
-      33%       { transform: translate(30px, -40px) scale(1.05); }
-      66%       { transform: translate(-20px, 20px) scale(0.97); }
-    }
-    .auth-bg-grid {
-      position: fixed; inset: 0; z-index: 0; pointer-events: none;
-      background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px);
-      background-size: 28px 28px;
-    }
-    .auth-badge {
-      position: relative; z-index: 10; margin-bottom: 28px;
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 6px 14px; border-radius: 100px;
-      border: 1px solid rgba(99,102,241,.35);
-      background: rgba(99,102,241,.08);
-      font-size: .72rem; font-weight: 600; letter-spacing: .05em;
-      color: #A5B4FC; text-transform: uppercase;
-      backdrop-filter: blur(8px);
-    }
-    .auth-badge-dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: #6366F1; box-shadow: 0 0 8px #6366F1;
-      animation: dotpulse 2s ease-in-out infinite;
-    }
-    @keyframes dotpulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: .6; transform: scale(1.3); }
-    }
-    .auth-card {
-      position: relative; z-index: 10;
-      width: 100%; max-width: 420px;
-      padding: 40px 36px 32px; border-radius: 20px;
-      background: rgba(255,255,255,.035);
-      border: 1px solid rgba(255,255,255,.1);
-      backdrop-filter: blur(24px) saturate(180%);
-      box-shadow: 0 0 0 1px rgba(99,102,241,.08), 0 24px 64px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
-      animation: cardIn .45s cubic-bezier(.16,1,.3,1) both;
-    }
-    @keyframes cardIn {
-      from { opacity: 0; transform: translateY(20px) scale(.98); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
-    }
-    .auth-card-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; }
-    .auth-card-logo img { width: 40px; height: 40px; flex-shrink: 0; }
-    .auth-card-logo-name { font-size: 1.25rem; font-weight: 800; color: #fff; letter-spacing: -.04em; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
-    .auth-card-logo-tag { font-size: .62rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.28); margin-top: 1px; }
-    .auth-card-title { font-size: 1.55rem; font-weight: 800; color: #fff; letter-spacing: -.045em; margin-bottom: 6px; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; line-height: 1.2; }
-    .auth-card-subtitle { font-size: .855rem; color: rgba(255,255,255,.42); margin-bottom: 26px; line-height: 1.65; }
-    .auth-alert { padding: 11px 14px; border-radius: 10px; font-size: .825rem; font-weight: 500; margin-bottom: 16px; display: none; }
-    .auth-alert.visible { display: block; }
-    .auth-alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.28); color: #FCA5A5; }
-    .auth-field { margin-bottom: 16px; }
-    .auth-field label { display: block; font-size: .78rem; font-weight: 600; color: rgba(255,255,255,.5); margin-bottom: 7px; text-transform: uppercase; letter-spacing: .05em; }
-    .auth-input-wrap { position: relative; }
-    .auth-field input {
-      width: 100%; padding: 11px 14px; border-radius: 10px;
-      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
-      color: #fff; font-size: .925rem; outline: none;
-      transition: border-color .18s, background .18s, box-shadow .18s;
-    }
-    .auth-field input::placeholder { color: rgba(255,255,255,.22); }
-    .auth-field input:focus { border-color: #6366F1; background: rgba(99,102,241,.08); box-shadow: 0 0 0 3px rgba(99,102,241,.2); }
-    .auth-field-error { font-size: .72rem; color: #FCA5A5; margin-top: 5px; display: none; }
-    .auth-field-error.visible { display: block; }
-    .auth-pw-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: rgba(255,255,255,.3); padding: 4px; display: flex; align-items: center; justify-content: center; transition: color .15s; }
-    .auth-pw-toggle:hover { color: rgba(255,255,255,.7); }
-    .auth-pw-toggle svg { width: 16px; height: 16px; }
-    .auth-btn {
-      width: 100%; padding: 13px; border-radius: 11px; border: none; cursor: pointer;
-      font-size: .95rem; font-weight: 700; color: #fff; letter-spacing: -.01em;
-      background: linear-gradient(135deg, #5B5EF4 0%, #818CF8 100%);
-      box-shadow: 0 4px 24px rgba(99,102,241,.4), inset 0 1px 0 rgba(255,255,255,.15);
-      transition: transform .15s, box-shadow .15s, opacity .15s;
-      margin-top: 8px; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
-    }
-    .auth-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(99,102,241,.55); }
-    .auth-btn:active:not(:disabled) { transform: translateY(0); }
-    .auth-btn:disabled { opacity: .55; cursor: not-allowed; }
-    .auth-social-proof { display: flex; align-items: center; gap: 8px; margin-top: 22px; justify-content: center; }
-    .auth-avatars { display: flex; }
-    .auth-avatar-img { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,.15); margin-left: -8px; font-size: .6rem; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
-    .auth-avatar-img:first-child { margin-left: 0; }
-    .auth-social-text { font-size: .73rem; color: rgba(255,255,255,.38); }
-    .auth-social-text strong { color: rgba(255,255,255,.65); }
-    .auth-switch { margin-top: 18px; text-align: center; font-size: .8125rem; color: rgba(255,255,255,.35); }
-    .auth-switch a { color: #818CF8; font-weight: 600; text-decoration: none; }
-    .auth-switch a:hover { color: #A5B4FC; }
-    .auth-demo { margin-top: 10px; text-align: center; font-size: .7rem; color: rgba(255,255,255,.2); }
-    .auth-airbnb-box { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); }
-    .auth-airbnb-box > label { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: .875rem; font-weight: 600; color: rgba(255,255,255,.8); }
-    .auth-airbnb-box > label input[type=checkbox] { width: 16px; height: 16px; accent-color: #6366F1; cursor: pointer; }
-    .auth-airbnb-box p { font-size: .76rem; color: rgba(255,255,255,.35); margin-top: 7px; }
-    .auth-airbnb-sub { margin-top: 12px; }
-    .auth-airbnb-sub label { font-size: .75rem; color: rgba(255,255,255,.45); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
-    .auth-airbnb-sub input { width: 100%; padding: 9px 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: #fff; font-size: .85rem; outline: none; }
-    .auth-airbnb-sub input:focus { border-color: #6366F1; }
-    .auth-airbnb-sub span { font-size: .68rem; color: rgba(255,255,255,.25); margin-top: 4px; display: block; }
-    .auth-progress-box { margin-top: 16px; padding: 24px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); text-align: center; }
-    .auth-progress-box p { font-size: .875rem; font-weight: 600; color: rgba(255,255,255,.8); margin: 10px 0 4px; }
-    .auth-progress-box small { font-size: .76rem; color: rgba(255,255,255,.35); }
-    .auth-footer-stats { position: relative; z-index: 10; display: flex; align-items: center; gap: 24px; margin-top: 28px; }
-    .auth-footer-stat { text-align: center; }
-    .auth-footer-stat-value { display: block; font-size: .9rem; font-weight: 800; color: rgba(255,255,255,.7); font-family: 'Plus Jakarta Sans', sans-serif; }
-    .auth-footer-stat-label { font-size: .65rem; color: rgba(255,255,255,.28); text-transform: uppercase; letter-spacing: .06em; }
-    .auth-footer-divider { width: 1px; height: 26px; background: rgba(255,255,255,.12); }
-    .spin { display: inline-block; width: 26px; height: 26px; border: 3px solid rgba(255,255,255,.15); border-top-color: #6366F1; border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (max-width: 480px) { .auth-card { padding: 28px 20px 24px; border-radius: 16px; } .auth-footer-stats { display: none; } .auth-badge { display: none; } }
-  </style>
 </head>
-<body class="auth-body">
-  <a href="#main-content" class="skip-link" style="position:absolute;left:-9999px">Aller au contenu principal</a>
+<body>
+<a href="#main-content" class="skip-link">Aller au contenu principal</a>
 
-  <div class="auth-bg" aria-hidden="true">
-    <div class="auth-bg-orb auth-bg-orb-1"></div>
-    <div class="auth-bg-orb auth-bg-orb-2"></div>
-    <div class="auth-bg-orb auth-bg-orb-3"></div>
-  </div>
-  <div class="auth-bg-grid" aria-hidden="true"></div>
+<div class="auth-page">
 
-  <main id="main-content" style="display:flex;flex-direction:column;align-items:center;padding:24px 16px;">
-
-    <div class="auth-badge" aria-hidden="true">
-      <span class="auth-badge-dot"></span>
-      Plateforme disponible &amp; opérationnelle
-    </div>
-
-    <div class="auth-card">
-      <div class="auth-card-logo">
-        <img src="logo.svg" alt="Stayora" width="40" height="40">
-        <div>
-          <div class="auth-card-logo-name">Stayora</div>
-          <div class="auth-card-logo-tag">Gestion locative IA</div>
+  <!-- ═══════════════════════════════════════
+       LEFT — Hero panel
+  ═══════════════════════════════════════════ -->
+  <aside class="auth-hero" aria-hidden="true">
+    <div class="auth-hero-blob auth-hero-blob-1"></div>
+    <div class="auth-hero-blob auth-hero-blob-2"></div>
+    <div class="auth-hero-blob auth-hero-blob-3"></div>
+    <div class="auth-hero-inner">
+      <div class="auth-hero-logo">
+        <div class="auth-hero-logo-icon">
+          <img src="logo.svg" width="26" height="26" alt="Michel" style="display:block;">
+        </div>
+        <span class="auth-hero-logo-name">Michel</span>
+      </div>
+      <div class="auth-hero-content">
+        <h1>Gérez vos messages voyageurs plus vite.</h1>
+        <p>Centralisez Airbnb, Booking et vos conversations dans une seule interface intelligente, pilotée par l'IA.</p>
+      </div>
+      <div class="auth-hero-stats">
+        <div class="auth-hero-stat">
+          <span class="auth-hero-stat-value">3×</span>
+          <span class="auth-hero-stat-label">Plus rapide</span>
+        </div>
+        <div class="auth-hero-stat-divider"></div>
+        <div class="auth-hero-stat">
+          <span class="auth-hero-stat-value">100%</span>
+          <span class="auth-hero-stat-label">Automatisé</span>
+        </div>
+        <div class="auth-hero-stat-divider"></div>
+        <div class="auth-hero-stat">
+          <span class="auth-hero-stat-value">24/7</span>
+          <span class="auth-hero-stat-label">Disponible</span>
         </div>
       </div>
+      <div class="auth-hero-features">
+        <div class="auth-hero-feature">
+          <div class="feat-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+          <span>Réponses IA en un clic, dans votre style</span>
+        </div>
+        <div class="auth-hero-feature">
+          <div class="feat-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+          <span>Calendrier et disponibilités synchronisés</span>
+        </div>
+        <div class="auth-hero-feature">
+          <div class="feat-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+          <span>Gmail Airbnb connecté directement</span>
+        </div>
+        <div class="auth-hero-feature">
+          <div class="feat-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+          <span>Multi-logements, un seul tableau de bord</span>
+        </div>
+      </div>
+      <div class="auth-hero-testimonial">
+        <p class="auth-testimonial-text">« J'ai réduit de moitié le temps passé à répondre aux voyageurs. L'IA comprend le contexte de chaque logement. »</p>
+        <div class="auth-testimonial-author">
+          <div class="auth-testimonial-avatar">S</div>
+          <div>
+            <div class="auth-testimonial-name">Sophie M.</div>
+            <div class="auth-testimonial-role">Hôte • 8 logements Airbnb</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
 
-      <h1 class="auth-card-title" id="form-title">Bon retour 👋</h1>
-      <p class="auth-card-subtitle" id="form-subtitle">Connectez-vous pour accéder à votre tableau de bord.</p>
+  <!-- ═══════════════════════════════════════
+       RIGHT — Form panel
+  ═══════════════════════════════════════════ -->
+  <main class="auth-form-side" id="main-content">
+    <div class="auth-mobile-logo">
+      <div style="width:32px;height:32px;background:linear-gradient(135deg,#6366F1,#818CF8);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <img src="logo.svg" width="20" height="20" alt="" style="display:block;">
+      </div>
+      <span>Michel</span>
+    </div>
+    <div class="auth-form-card">
+      <div class="auth-form-header">
+        <h2 id="form-title">Bon retour</h2>
+        <p id="form-subtitle">Connectez-vous pour accéder à votre tableau de bord.</p>
+      </div>
 
       <div id="error-message" class="auth-alert auth-alert-error" role="alert" aria-live="polite"></div>
 
       <form id="auth-form" novalidate>
         <div class="auth-field">
-          <label for="email">Adresse email</label>
+          <label for="email">Email</label>
           <div class="auth-input-wrap">
             <input type="email" id="email" name="email" required autocomplete="email" placeholder="vous@exemple.com" aria-describedby="email-error">
           </div>
@@ -218,7 +126,7 @@
             <input type="checkbox" id="link-airbnb-check">
             Importer mes logements Airbnb
           </label>
-          <p>Synchronisez automatiquement tous vos logements depuis votre profil.</p>
+          <p>Synchronisez automatiquement vos logements depuis votre profil.</p>
           <div id="airbnb-url-section" class="auth-airbnb-sub hidden">
             <label for="airbnb-profile-url">URL profil hôte Airbnb</label>
             <input type="url" id="airbnb-profile-url" placeholder="https://www.airbnb.fr/users/show/123456789">
@@ -237,42 +145,14 @@
 
       <p class="auth-switch">
         <span id="switch-text">Pas encore de compte ?</span>
-        <a href="#" id="switch-link"> Créer un compte</a>
+        <a href="#" id="switch-link">Créer un compte</a>
       </p>
+    </div><!-- /.auth-form-card -->
+  </main><!-- /.auth-form-side -->
 
-      <div class="auth-social-proof">
-        <div class="auth-avatars">
-          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#6366F1,#818CF8);">ML</div>
-          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#0EA5E9,#38BDF8);">JD</div>
-          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#7C3AED,#A78BFA);">SR</div>
-          <div class="auth-avatar-img" style="background:linear-gradient(135deg,#10B981,#34D399);">AK</div>
-        </div>
-        <p class="auth-social-text"><strong>2 400+ hôtes</strong> gèrent leurs logements avec Stayora</p>
-      </div>
+</div><!-- /.auth-page -->
 
-      <p class="auth-demo">Démo : demo@stayora.com / demo1234</p>
-    </div>
-
-    <div class="auth-footer-stats" aria-hidden="true">
-      <div class="auth-footer-stat">
-        <span class="auth-footer-stat-value">1.2M+</span>
-        <span class="auth-footer-stat-label">Messages traités</span>
-      </div>
-      <div class="auth-footer-divider"></div>
-      <div class="auth-footer-stat">
-        <span class="auth-footer-stat-value">98%</span>
-        <span class="auth-footer-stat-label">Satisfaction</span>
-      </div>
-      <div class="auth-footer-divider"></div>
-      <div class="auth-footer-stat">
-        <span class="auth-footer-stat-value">&lt; 5s</span>
-        <span class="auth-footer-stat-label">Réponse IA</span>
-      </div>
-    </div>
-
-  </main>
-
-  <div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
+<div class="toast-container" id="toast-container" aria-live="assertive" role="status"></div>
 
   <script>
     const form         = document.getElementById('auth-form');
@@ -303,19 +183,19 @@
       isRegister = !isRegister;
       errorDiv.classList.remove('visible');
       if (isRegister) {
-        formTitle.textContent = 'Créer un compte 🚀';
+        formTitle.textContent = 'Créer un compte';
         formSubtitle.textContent = 'Commencez gratuitement, sans carte bancaire.';
         submitBtn.textContent = "S'inscrire";
         switchText.textContent = 'Déjà un compte ?';
-        switchLink.textContent = ' Se connecter';
+        switchLink.textContent = 'Se connecter';
         pwInput.autocomplete = 'new-password';
         document.getElementById('airbnb-link-section').classList.remove('hidden');
       } else {
-        formTitle.textContent = 'Bon retour 👋';
+        formTitle.textContent = 'Bon retour';
         formSubtitle.textContent = 'Connectez-vous pour accéder à votre tableau de bord.';
         submitBtn.textContent = 'Se connecter';
         switchText.textContent = 'Pas encore de compte ?';
-        switchLink.textContent = ' Créer un compte';
+        switchLink.textContent = 'Créer un compte';
         pwInput.autocomplete = 'current-password';
         document.getElementById('airbnb-link-section').classList.add('hidden');
       }

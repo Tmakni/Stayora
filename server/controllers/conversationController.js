@@ -97,7 +97,7 @@ async function getConversation(req, res) {
     
     // Récupérer conversation
     const conversations = await db.query(
-      'SELECT id, user_id, title, booking_status, property_id, airbnb_thread_id, external_id, external_provider, guest_name, created_at, updated_at FROM conversations WHERE id = ?',
+      'SELECT id, user_id, title, booking_status, property_id, airbnb_thread_id, airbnb_reply_url, external_id, external_provider, guest_name, created_at, updated_at FROM conversations WHERE id = ?',
       [id]
     );
     

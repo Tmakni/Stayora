@@ -1,10 +1,10 @@
 ﻿<!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('michel-theme')||'dark')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tableau de bord — Stayora</title>
+  <title>Tableau de bord — Michel</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
   <style>
@@ -52,7 +52,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">Stayora</span>
+    <span class="mobile-topbar-title">Michel</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -60,9 +60,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <img src="logo.svg" width="32" height="32" alt="Stayora">
+        <img src="logo.svg" width="32" height="32" alt="Michel">
       </div>
-      <span class="sidebar-brand-name">Stayora</span>
+      <span class="sidebar-brand-name">Michel</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 
@@ -122,22 +122,18 @@
     <!-- Stats row -->
     <div class="stats-grid" id="stats-grid">
       <div class="stat-card stat-blue">
-        <span class="stat-icon"><i data-lucide="home"></i></span>
         <div class="stat-value" id="stat-properties">-</div>
         <div class="stat-label">Propriétés</div>
       </div>
       <div class="stat-card stat-green">
-        <span class="stat-icon"><i data-lucide="message-square"></i></span>
         <div class="stat-value" id="stat-conversations">-</div>
         <div class="stat-label">Conversations</div>
       </div>
       <div class="stat-card stat-orange">
-        <span class="stat-icon"><i data-lucide="bot"></i></span>
         <div class="stat-value" id="stat-autoreplies">-</div>
         <div class="stat-label">Réponses auto actives</div>
       </div>
       <div class="stat-card stat-red">
-        <span class="stat-icon"><i data-lucide="mail"></i></span>
         <div class="stat-value" id="stat-messages">-</div>
         <div class="stat-label">Messages traités</div>
       </div>
@@ -190,12 +186,6 @@
           <p class="section-description">Suivez les échanges entrants, priorisez les réponses et déclenchez vos automatisations au bon moment.</p>
         </div>
         <div class="section-actions">
-          <button class="btn btn-outline btn-sm" id="purge-non-airbnb-btn" onclick="purgeNonAirbnb()" aria-label="Supprimer les conversations non-Airbnb" style="border-color:var(--clr-danger);color:var(--clr-danger);">
-            Purger non-Airbnb
-          </button>
-          <button class="btn btn-primary" id="new-conversation-btn" aria-label="Nouvelle conversation">
-            + Nouvelle
-          </button>
         </div>
       </div>
 
@@ -209,7 +199,7 @@
         <div class="empty-state-icon"><i data-lucide="message-square"></i></div>
         <h3>Aucune conversation</h3>
         <p>Créez une conversation pour simuler et générer des réponses IA.</p>
-        <button class="btn btn-primary" onclick="document.getElementById('new-conversation-btn').click()">
+        <button class="btn btn-primary" onclick="document.getElementById('new-conversation-modal').classList.remove('hidden');">
           Première conversation
         </button>
       </div>
@@ -269,17 +259,7 @@
         </div>
       </div>
 
-      <div class="card mb-3">
-        <div class="card-header"><h3 class="card-title">Clé API</h3></div>
-        <form id="settings-form">
-          <div class="form-group">
-            <label for="openai-key">Clé API OpenAI</label>
-            <input type="password" id="openai-key" placeholder="sk-..." autocomplete="off" aria-label="Clé API OpenAI">
-            <span class="form-hint">Utilisée pour la génération des réponses IA. Se configure dans le fichier .env du serveur.</span>
-          </div>
-          <button type="submit" class="btn btn-primary">Sauvegarder</button>
-        </form>
-      </div>
+
 
       <div class="card mb-3">
         <div class="card-header"><h3 class="card-title">Session</h3></div>
@@ -1332,7 +1312,7 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   // ---- Theme (dark/light) ----
   function setTheme(mode) {
     document.documentElement.setAttribute('data-theme', mode);
-    localStorage.setItem('hostai-theme', mode);
+    localStorage.setItem('michel-theme', mode);
     updateThemeButtons(mode);
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
@@ -1350,7 +1330,7 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   }
   // Apply saved theme on load
   (function() {
-    const saved = localStorage.getItem('hostai-theme') || 'light';
+    const saved = localStorage.getItem('michel-theme') || 'dark';
     document.documentElement.setAttribute('data-theme', saved);
     // Update buttons once DOM is ready
     setTimeout(() => updateThemeButtons(saved), 0);
@@ -2080,10 +2060,6 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   });
 
   // ---- New Conversation modal ----
-  document.getElementById('new-conversation-btn').addEventListener('click', () => {
-    document.getElementById('new-conversation-modal').classList.remove('hidden');
-    document.getElementById('conv-title').focus();
-  });
   document.getElementById('close-conversation-modal-btn').addEventListener('click', closeConvModal);
   document.getElementById('cancel-conversation-btn').addEventListener('click', closeConvModal);
   document.getElementById('new-conversation-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeConvModal(); });
@@ -2414,12 +2390,6 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     document.getElementById('property-name').focus();
     toast('success', 'Formulaire pré-rempli ! Vérifiez et complétez les informations.');
   }
-
-  // ---- Settings form ----
-  document.getElementById('settings-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    toast('info','Les cles API se configurent dans le fichier .env du serveur.');
-  });
 
   // ---- Toast helper ----
   function toast(type, message) {

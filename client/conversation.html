@@ -1,10 +1,10 @@
 ﻿<!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('michel-theme')||'dark')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Conversation — Stayora</title>
+  <title>Conversation — Michel</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
   <style>
@@ -76,7 +76,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">Stayora</span>
+    <span class="mobile-topbar-title">Michel</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -84,9 +84,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <img src="logo.svg" width="32" height="32" alt="Stayora">
+        <img src="logo.svg" width="32" height="32" alt="Michel">
       </div>
-      <span class="sidebar-brand-name">Stayora</span>
+      <span class="sidebar-brand-name">Michel</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 
@@ -624,11 +624,11 @@
 
     const btn = document.getElementById('direct-airbnb-send-btn');
 
-    // Build the Airbnb thread URL for this conversation
-    const airbnbThreadUrl = conversation.airbnb_thread_id
-      ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}`
-      : 'https://www.airbnb.com/hosting/inbox';
-    console.log('[Airbnb Direct] thread_id:', conversation.airbnb_thread_id, '→', airbnbThreadUrl);
+    // Build the Airbnb thread URL — priority: stored reply URL > thread_id > generic inbox
+    const airbnbThreadUrl = conversation.airbnb_reply_url
+      || (conversation.airbnb_thread_id ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}` : null)
+      || 'https://www.airbnb.com/hosting/inbox';
+    console.log('[Airbnb Direct] thread_id:', conversation.airbnb_thread_id, 'reply_url:', conversation.airbnb_reply_url, '→', airbnbThreadUrl);
 
     if (conversation.has_airbnb_api) {
       // API mode: send directly then open the conversation on Airbnb
@@ -878,11 +878,11 @@
 
 
 
-    // Build the Airbnb thread URL for this conversation
-    const airbnbDraftUrl = conversation.airbnb_thread_id
-      ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}`
-      : 'https://www.airbnb.com/hosting/inbox';
-    console.log('[Airbnb Draft] thread_id:', conversation.airbnb_thread_id, '→', airbnbDraftUrl);
+    // Build the Airbnb thread URL — priority: stored reply URL > thread_id > generic inbox
+    const airbnbDraftUrl = conversation.airbnb_reply_url
+      || (conversation.airbnb_thread_id ? `https://www.airbnb.com/hosting/inbox/thread/${conversation.airbnb_thread_id}` : null)
+      || 'https://www.airbnb.com/hosting/inbox';
+    console.log('[Airbnb Draft] thread_id:', conversation.airbnb_thread_id, 'reply_url:', conversation.airbnb_reply_url, '→', airbnbDraftUrl);
 
     if (conversation.has_airbnb_api) {
       // API mode: send then open conversation on Airbnb

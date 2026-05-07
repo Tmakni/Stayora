@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="fr">
-<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('stayora-theme')||'light')</script>
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('michel-theme')||'dark')</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Calendrier — Stayora</title>
+  <title>Calendrier — Michel</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
   <style>
@@ -175,7 +175,7 @@
     <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Ouvrir le menu" onclick="toggleSidebar()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="mobile-topbar-title">Stayora</span>
+    <span class="mobile-topbar-title">Michel</span>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -183,9 +183,9 @@
   <aside class="dashboard-sidebar" id="dashboard-sidebar" role="navigation" aria-label="Menu lateral">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <img src="logo.svg" width="32" height="32" alt="Stayora">
+        <img src="logo.svg" width="32" height="32" alt="Michel">
       </div>
-      <span class="sidebar-brand-name">Stayora</span>
+      <span class="sidebar-brand-name">Michel</span>
       <button class="btn btn-ghost btn-icon sidebar-close-btn" onclick="closeSidebar()" aria-label="Fermer le menu">✕</button>
     </div>
 
@@ -230,7 +230,7 @@
   <div class="property-selector">
     <label for="property-select" style="font-weight:600;font-size:.9rem;">Logement :</label>
     <select id="property-select"><option value="">Chargement...</option></select>
-    <button class="btn btn-primary btn-sm" id="add-block-btn">+ Bloquer des dates</button>
+    <button class="btn btn-primary btn-sm" id="add-block-btn" style="display:none;">+ Bloquer des dates</button>
   </div>
 
   <!-- iCal connection card -->
@@ -286,46 +286,6 @@
   </div>
 
   </main>
-</div>
-
-<!-- Modal: Add block -->
-<div class="modal-overlay" id="block-modal">
-  <div class="modal">
-    <h3>Bloquer des dates</h3>
-    <form id="block-form">
-      <div class="form-row" style="margin-bottom:12px;">
-        <div class="form-group" style="margin-bottom:0;">
-          <label for="block-start">Date début</label>
-          <input type="date" id="block-start" required>
-        </div>
-        <div class="form-group" style="margin-bottom:0;">
-          <label for="block-end">Date fin</label>
-          <input type="date" id="block-end" required>
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="block-reason">Raison</label>
-        <select id="block-reason">
-          <option value="blocked">Indisponible</option>
-          <option value="reserved">Réservation externe</option>
-          <option value="maintenance">Maintenance</option>
-          <option value="personal">Usage personnel</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="block-guest">Nom du voyageur (optionnel)</label>
-        <input type="text" id="block-guest" placeholder="ex: Jean Dupont">
-      </div>
-      <div class="form-group">
-        <label for="block-notes">Notes (optionnel)</label>
-        <input type="text" id="block-notes" placeholder="ex: Plombier prévu le mardi">
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-        <button type="button" class="btn btn-outline btn-sm" id="cancel-block">Annuler</button>
-        <button type="submit" class="btn btn-primary btn-sm">Bloquer</button>
-      </div>
-    </form>
-  </div>
 </div>
 
 <!-- Toast -->
@@ -707,48 +667,6 @@
   }
 
   // ================================================================
-  // Block modal
-  // ================================================================
-  function openBlockModal() {
-    document.getElementById('block-modal').classList.add('active');
-  }
-  function closeBlockModal() {
-    document.getElementById('block-modal').classList.remove('active');
-    document.getElementById('block-form').reset();
-  }
-
-  document.getElementById('add-block-btn').addEventListener('click', () => {
-    const today = new Date().toISOString().slice(0, 10);
-    document.getElementById('block-start').value = today;
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-    document.getElementById('block-end').value = tomorrow;
-    openBlockModal();
-  });
-  document.getElementById('cancel-block').addEventListener('click', closeBlockModal);
-  document.getElementById('block-modal').addEventListener('click', (e) => {
-    if (e.target === document.getElementById('block-modal')) closeBlockModal();
-  });
-
-  document.getElementById('block-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!currentPropertyId) return;
-
-    const body = {
-      start_date: document.getElementById('block-start').value,
-      end_date: document.getElementById('block-end').value,
-      reason: document.getElementById('block-reason').value,
-      guest_name: document.getElementById('block-guest').value || null,
-      notes: document.getElementById('block-notes').value || null
-    };
-
-    try {
-      await apiRequest(`/api/properties/${currentPropertyId}/calendar`, { method: 'POST', body });
-      closeBlockModal();
-      toast('success', 'Dates bloquées !');
-      loadCalendar();
-    } catch(err) { toast('error', err.message); }
-  });
-
   // ================================================================
   // Toast
   // ================================================================
