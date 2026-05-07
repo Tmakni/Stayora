@@ -23,8 +23,8 @@ RUN mkdir -p /home/appuser/.local/share/airbnb-ai-agent \
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Ensure migrations folder is accessible
-RUN chown -R appuser:appgroup /app/migrations
+# Give appuser ownership of the entire app
+RUN chown -R appuser:appgroup /app
 
 # Cloud Run injects PORT (default 8080); the app reads process.env.PORT
 EXPOSE 8080
