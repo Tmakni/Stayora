@@ -15,9 +15,16 @@ WORKDIR /app
 # Non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
+# Create the SQLite DB directory with correct ownership
+RUN mkdir -p /home/appuser/.local/share/airbnb-ai-agent \
+    && chown -R appuser:appgroup /home/appuser/.local
+
 # Copy dependencies and app code
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Ensure migrations folder is accessible
+RUN chown -R appuser:appgroup /app/migrations
 
 # Cloud Run injects PORT (default 8080); the app reads process.env.PORT
 EXPOSE 8080
