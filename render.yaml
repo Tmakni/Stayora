@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: michel
+    runtime: docker
+    plan: starter          # Le disque persistant nécessite au moins le plan Starter
+    disk:
+      name: airbnb-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: SQLITE_DB_PATH
+        value: /data/airbnb_ai_agent.db
+      - key: NODE_ENV
+        value: production
+      - key: USE_MEMORY_DB
+        value: "true"

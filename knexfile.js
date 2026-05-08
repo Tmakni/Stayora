@@ -15,9 +15,11 @@ const os   = require('os');
  */
 
 // Chemin DB adapté à la plateforme
-const DB_PATH = process.platform === 'linux'
-  ? path.join(os.homedir(), '.local', 'share', 'airbnb-ai-agent', 'airbnb_ai_agent.db')
-  : path.join(__dirname, 'data', 'airbnb_ai_agent.db');
+// SQLITE_DB_PATH env var prend la priorité (ex: /data sur Render avec disque persistant)
+const DB_PATH = process.env.SQLITE_DB_PATH
+  || (process.platform === 'linux'
+    ? path.join(os.homedir(), '.local', 'share', 'airbnb-ai-agent', 'airbnb_ai_agent.db')
+    : path.join(__dirname, 'data', 'airbnb_ai_agent.db'));
 
 const MIGRATIONS = {
   directory: path.join(__dirname, 'migrations', 'db'),

@@ -15,9 +15,11 @@ WORKDIR /app
 # Non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Create the SQLite DB directory with correct ownership
-RUN mkdir -p /home/appuser/.local/share/airbnb-ai-agent \
-    && chown -R appuser:appgroup /home/appuser/.local
+# Create the SQLite DB directories with correct ownership
+# /data = Render persistent disk mount point (production)
+# ~/.local/share/... = fallback for local dev
+RUN mkdir -p /home/appuser/.local/share/airbnb-ai-agent /data \
+    && chown -R appuser:appgroup /home/appuser/.local /data
 
 # Copy dependencies and app code
 COPY --from=deps /app/node_modules ./node_modules
