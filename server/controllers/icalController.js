@@ -70,6 +70,17 @@ async function getCalendar(req, res) {
       return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
     }
 
+    // Verify ownership — a user may only read calendars for their own properties
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const props = await db.query(
+      'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, req.userId]
+    );
+    if (props.length === 0) {
+      return res.status(403).json({ error: 'Ce logement ne vous appartient pas.' });
+    }
+
     const calendarInfo = await icalService.getCalendarInfo(propertyId);
     const events = await icalService.getEvents(propertyId, from, to);
 
@@ -95,6 +106,18 @@ async function syncCalendar(req, res) {
   try {
     const icalService = getIcalService();
     const { propertyId } = req.params;
+
+    // Verify ownership before triggering sync
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const props = await db.query(
+      'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, req.userId]
+    );
+    if (props.length === 0) {
+      return res.status(403).json({ error: 'Ce logement ne vous appartient pas.' });
+    }
+
     const result = await icalService.syncPropertyCalendar(propertyId);
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -124,6 +147,17 @@ async function checkAvailability(req, res) {
 
     if (start >= end) {
       return res.status(400).json({ error: 'La date de fin doit être après la date de début' });
+    }
+
+    // Verify ownership — availability is linked to the property owner only
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const props = await db.query(
+      'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, req.userId]
+    );
+    if (props.length === 0) {
+      return res.status(403).json({ error: 'Ce logement ne vous appartient pas.' });
     }
 
     const result = await icalService.checkAvailability(propertyId, start, end);

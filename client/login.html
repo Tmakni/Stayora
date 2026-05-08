@@ -117,6 +117,14 @@
           </div>
           <div id="password-error" class="auth-field-error" aria-live="polite"></div>
         </div>
+        <!-- Confirm password — shown only on register -->
+        <div class="auth-field hidden" id="confirm-password-field">
+          <label for="confirm-password">Confirmer le mot de passe</label>
+          <div class="auth-input-wrap">
+            <input type="password" id="confirm-password" name="confirm-password" autocomplete="new-password" placeholder="••••••••" aria-describedby="confirm-password-error">
+          </div>
+          <div id="confirm-password-error" class="auth-field-error" aria-live="polite"></div>
+        </div>
         <button type="submit" class="auth-btn" id="submit-btn">Se connecter</button>
       </form>
 
@@ -189,6 +197,7 @@
         switchText.textContent = 'Déjà un compte ?';
         switchLink.textContent = 'Se connecter';
         pwInput.autocomplete = 'new-password';
+        document.getElementById('confirm-password-field').classList.remove('hidden');
         document.getElementById('airbnb-link-section').classList.remove('hidden');
       } else {
         formTitle.textContent = 'Bon retour';
@@ -197,6 +206,7 @@
         switchText.textContent = 'Pas encore de compte ?';
         switchLink.textContent = 'Créer un compte';
         pwInput.autocomplete = 'current-password';
+        document.getElementById('confirm-password-field').classList.add('hidden');
         document.getElementById('airbnb-link-section').classList.add('hidden');
       }
     });
@@ -206,9 +216,19 @@
       clearErrors();
       const email    = document.getElementById('email').value.trim();
       const password = pwInput.value;
+      const confirmPassword = document.getElementById('confirm-password').value;
       let valid = true;
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showFieldError('email-error', 'Veuillez entrer un email valide.'); valid = false; }
-      if (!password || password.length < 6) { showFieldError('password-error', 'Minimum 6 caractères.'); valid = false; }
+      if (isRegister) {
+        // Registration: stronger rules matching backend
+        if (!password || password.length < 8) { showFieldError('password-error', 'Minimum 8 caractères.'); valid = false; }
+        else if (!/[A-Z]/.test(password)) { showFieldError('password-error', 'Le mot de passe doit contenir au moins 1 majuscule.'); valid = false; }
+        else if (!/[0-9]/.test(password)) { showFieldError('password-error', 'Le mot de passe doit contenir au moins 1 chiffre.'); valid = false; }
+        if (valid && password !== confirmPassword) { showFieldError('confirm-password-error', 'Les mots de passe ne correspondent pas.'); valid = false; }
+      } else {
+        // Login: basic check only
+        if (!password || password.length < 6) { showFieldError('password-error', 'Mot de passe requis.'); valid = false; }
+      }
       if (!valid) return;
       setLoading(true);
       try {

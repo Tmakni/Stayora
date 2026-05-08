@@ -259,9 +259,128 @@ async function refresh(req, res) {
   }
 }
 
+/**
+ * PUT /api/auth/password
+ * Change the authenticated user's password.
+ * Body: { currentPassword, newPassword, confirmPassword }
+ */
+async function changePassword(req, res) {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: 'Tous les champs sont requis (mot de passe actuel, nouveau, confirmation).' });
+    }
+
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || typeof confirmPassword !== 'string') {
+      return res.status(400).json({ error: 'Données invalides.' });
+    }
+
+    // Confirm new passwords match
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'Les nouveaux mots de passe ne correspondent pas.' });
+    }
+
+    // Enforce password strength (same rules as register)
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 8 et 128 caractères.' });
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 1 majuscule et 1 chiffre.' });
+    }
+
+    const db = getDatabase();
+
+    const users = await db.query(
+      'SELECT id, email, password_hash FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+
+    const user = users[0];
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isValid) {
+      return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
+    }
+
+    // Do not allow setting the same password again
+    const isSamePassword = await bcrypt.compare(newPassword, user.password_hash);
+    if (isSamePassword) {
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit être différent de l\'actuel.' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+
+    await db.query(
+      'UPDATE users SET password_hash = ? WHERE id = ?',
+      [newHash, req.userId]
+    );
+
+    logger.info(`Password changed for user ${req.userId}`);
+
+    // Send confirmation email (non-blocking fallback)
+    try {
+      await sendPasswordChangedEmail(user.email);
+    } catch (emailErr) {
+      logger.warn(`Password change email failed for ${user.email}: ${emailErr.message}`);
+      // Not a fatal error — password was changed successfully
+    }
+
+    return res.json({ success: true, message: 'Mot de passe modifié avec succès.' });
+  } catch (error) {
+    logger.error('Change password error:', error);
+    return res.status(500).json({ error: 'Erreur lors du changement de mot de passe.' });
+  }
+}
+
+/**
+ * Sends a security notification email after a password change.
+ * Falls back to a log if no email transport is configured.
+ */
+async function sendPasswordChangedEmail(email) {
+  // If a nodemailer transport is available, use it; otherwise log clearly
+  try {
+    const nodemailer = require('nodemailer');
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+
+    if (!smtpUser || !smtpPass) {
+      logger.info(`[PASSWORD_CHANGE_EMAIL] Would send to ${email}: "Votre mot de passe a été modifié. Si vous n'êtes pas à l'origine de cette action, contactez le support immédiatement."`);
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass }
+    });
+
+    await transporter.sendMail({
+      from: `"Michel – HostAI" <${smtpUser}>`,
+      to: email,
+      subject: 'Votre mot de passe a été modifié',
+      text: `Bonjour,\n\nVotre mot de passe a bien été modifié.\n\nSi vous n'êtes pas à l'origine de cette modification, contactez immédiatement le support.\n\nL'équipe Michel`,
+      html: `<p>Bonjour,</p><p>Votre mot de passe a bien été modifié.</p><p>Si vous n'êtes <strong>pas</strong> à l'origine de cette modification, contactez immédiatement le support.</p><p>L'équipe Michel</p>`
+    });
+
+    logger.info(`Password change email sent to ${email}`);
+  } catch (err) {
+    throw err;
+  }
+}
+
 module.exports = {
   register,
   login,
   me,
-  refresh
+  refresh,
+  changePassword
 };

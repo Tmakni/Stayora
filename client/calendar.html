@@ -239,22 +239,35 @@
       <div class="ical-dot disconnected" id="ical-dot"></div>
       <div class="ical-info">
         <div class="ical-label" id="ical-label">Calendrier iCal non connecté</div>
-        <div class="ical-detail" id="ical-detail">Ajoutez le lien iCal de votre logement Airbnb pour synchroniser automatiquement les disponibilités.</div>
+        <div class="ical-detail" id="ical-detail">Ajoutez le lien iCal de votre logement pour synchroniser automatiquement les disponibilités et éviter les erreurs de disponibilité.</div>
       </div>
       <div class="ical-actions" id="ical-actions">
         <button class="btn btn-primary btn-sm" id="ical-connect-btn">Connecter un calendrier</button>
       </div>
     </div>
     <!-- Connection form (hidden by default) -->
-    <div class="ical-form" id="ical-form" style="display:none;">
-      <input type="url" id="ical-url" placeholder="https://www.airbnb.fr/calendar/ical/XXXXX.ics?s=..." autocomplete="off">
-      <button class="btn btn-primary btn-sm" id="ical-save-btn">Connecter</button>
-      <button class="btn btn-outline btn-sm" id="ical-cancel-btn">Annuler</button>
-    </div>
-    <div class="ical-help" id="ical-help" style="display:none;">
-      <strong>Où trouver le lien iCal ?</strong><br>
-      Airbnb &rarr; Votre annonce &rarr; Calendrier &rarr; Disponibilité &rarr; Exporter le calendrier &rarr; Copier le lien iCal (.ics)<br>
-      Le calendrier se synchronisera automatiquement toutes les 30 minutes.
+    <div id="ical-form-wrapper" style="display:none;">
+      <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 16px;margin-top:14px;font-size:.83rem;color:var(--clr-text-muted);line-height:1.7;">
+        <strong style="color:var(--clr-text);display:block;margin-bottom:6px;">📋 Comment trouver votre lien iCal ?</strong>
+        <ol style="margin:0;padding-left:18px;">
+          <li>Ouvrez <strong>Airbnb</strong>, <strong>Booking</strong> ou votre plateforme de location.</li>
+          <li>Allez dans la gestion du calendrier de votre logement.</li>
+          <li>Cherchez l'option <em>Exporter le calendrier</em> ou <em>Synchroniser le calendrier</em>.</li>
+          <li>Copiez le lien iCal fourni (il se termine souvent par <code>.ics</code>).</li>
+          <li>Revenez ici, sélectionnez le bon logement ci-dessus et collez le lien ci-dessous.</li>
+        </ol>
+        <div style="margin-top:10px;padding:8px 10px;background:var(--clr-bg);border-radius:6px;font-family:monospace;font-size:.77rem;opacity:.85;">
+          Exemple : https://www.airbnb.fr/calendar/ical/123456789.ics?s=abcdef...
+        </div>
+        <p style="margin-top:8px;margin-bottom:0;font-size:.8rem;color:var(--clr-text-secondary);">
+          ⚠️ <strong>Important :</strong> Chaque calendrier doit être lié au bon logement. Vérifiez que vous avez sélectionné le bon logement dans le sélecteur ci-dessus.
+        </p>
+      </div>
+      <div class="ical-form" id="ical-form" style="display:flex;margin-top:10px;">
+        <input type="url" id="ical-url" placeholder="https://www.airbnb.fr/calendar/ical/XXXXX.ics?s=..." autocomplete="off">
+        <button class="btn btn-primary btn-sm" id="ical-save-btn">Connecter</button>
+        <button class="btn btn-outline btn-sm" id="ical-cancel-btn">Annuler</button>
+      </div>
     </div>
   </div>
 
@@ -415,27 +428,22 @@
 
       document.getElementById('ical-sync-btn').addEventListener('click', syncIcal);
       document.getElementById('ical-disconnect-btn').addEventListener('click', disconnectIcal);
-      document.getElementById('ical-form').style.display = 'none';
-      document.getElementById('ical-help').style.display = 'none';
-
-    } else {
+      document.getElementById('ical-form-wrapper').style.display = 'none';
       dot.className = 'ical-dot disconnected';
       label.textContent = 'Calendrier iCal non connecté';
-      detail.textContent = 'Ajoutez le lien iCal de votre logement Airbnb pour synchroniser automatiquement les disponibilités.';
+      detail.textContent = 'Ajoutez le lien iCal de votre logement pour synchroniser automatiquement les disponibilités.';
       actions.innerHTML = '<button class="btn btn-primary btn-sm" id="ical-connect-btn">Connecter un calendrier</button>';
       document.getElementById('ical-connect-btn').addEventListener('click', showIcalForm);
     }
   }
 
   function showIcalForm() {
-    document.getElementById('ical-form').style.display = 'flex';
-    document.getElementById('ical-help').style.display = 'block';
+    document.getElementById('ical-form-wrapper').style.display = 'block';
     document.getElementById('ical-url').focus();
   }
 
   document.getElementById('ical-cancel-btn').addEventListener('click', () => {
-    document.getElementById('ical-form').style.display = 'none';
-    document.getElementById('ical-help').style.display = 'none';
+    document.getElementById('ical-form-wrapper').style.display = 'none';
   });
 
   document.getElementById('ical-save-btn').addEventListener('click', connectIcal);

@@ -115,7 +115,6 @@
       </div>
       <div class="dashboard-hero-actions">
         <button class="btn btn-outline" onclick="showSection('conversations')">Voir les conversations</button>
-        <button class="btn btn-primary" onclick="document.getElementById('new-property-btn').click()">Nouveau logement</button>
       </div>
     </section>
 
@@ -152,10 +151,7 @@
         <div class="section-actions">
           <button class="btn btn-outline btn-sm" id="import-airbnb-btn" aria-label="Connecter Airbnb" style="border-color:var(--clr-primary);color:var(--clr-primary);gap:8px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
-            Connecter Airbnb
-          </button>
-          <button class="btn btn-primary" id="new-property-btn" aria-label="Ajouter une propriété">
-            + Ajouter
+            Importer depuis Airbnb
           </button>
         </div>
       </div>
@@ -170,9 +166,10 @@
       <div id="empty-properties" class="empty-state hidden">
         <div class="empty-state-icon"><i data-lucide="home"></i></div>
         <h3>Aucune propriété</h3>
-        <p>Ajoutez votre premier logement pour que l'IA puisse répondre avec les bonnes informations.</p>
-        <button class="btn btn-primary" onclick="document.getElementById('new-property-btn').click()">
-          Ajouter une propriété
+        <p>Importez votre premier logement depuis Airbnb pour que l'IA puisse répondre avec les bonnes informations.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('import-airbnb-btn').click()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:6px;"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
+          Importer depuis Airbnb
         </button>
       </div>
     </section>
@@ -198,9 +195,9 @@
       <div id="empty-conversations" class="empty-state hidden">
         <div class="empty-state-icon"><i data-lucide="message-square"></i></div>
         <h3>Aucune conversation</h3>
-        <p>Créez une conversation pour simuler et générer des réponses IA.</p>
-        <button class="btn btn-primary" onclick="document.getElementById('new-conversation-modal').classList.remove('hidden');">
-          Première conversation
+        <p>Les conversations sont créées automatiquement depuis vos emails Airbnb / Booking. Connectez Gmail dans la section <strong>Intégrations</strong> pour importer vos messages.</p>
+        <button class="btn btn-primary" onclick="showSection('integrations')">
+          <i data-lucide="link" style="width:16px;height:16px;"></i> Connecter Gmail
         </button>
       </div>
     </section>
@@ -216,13 +213,29 @@
       </div>
 
       <div class="card mb-3">
-        <h3 style="margin-bottom:16px;">Plateformes connectées</h3>
+        <h3 style="margin-bottom:8px;">Connecter votre boîte mail</h3>
+        <p style="font-size:.875rem;color:var(--clr-text-muted);margin-bottom:16px;line-height:1.6;">
+          Connecter votre Gmail permet à l'application de récupérer automatiquement les messages Airbnb / Booking et de les afficher dans vos conversations. Vos emails sont liés <strong>uniquement à votre compte</strong> — aucun autre utilisateur ne peut y accéder.
+        </p>
+
+        <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;font-size:.83rem;color:var(--clr-text-muted);line-height:1.7;">
+          <strong style="color:var(--clr-text);display:block;margin-bottom:6px;">📋 Comment connecter Gmail ?</strong>
+          <ol style="margin:0;padding-left:18px;">
+            <li>Cliquez sur <strong>Connecter Gmail</strong> ci-dessous.</li>
+            <li>Connectez-vous avec le compte Google qui reçoit vos notifications Airbnb / Booking.</li>
+            <li>Acceptez les autorisations demandées (lecture des emails).</li>
+            <li>Revenez dans l'application — les conversations seront synchronisées automatiquement.</li>
+          </ol>
+          <p style="margin-top:8px;margin-bottom:0;font-size:.8rem;">
+            ⚠️ Si le token expire ou si Gmail affiche une erreur, utilisez le bouton <strong>Reconnecter</strong> qui apparaît sur le compte.
+          </p>
+        </div>
 
         <div class="integration-card" id="gmail-card">
           <div class="integration-logo" style="font-size:1.4rem;"><i data-lucide="mail"></i></div>
           <div class="integration-info">
-            <h4>Gmail — Notifications Airbnb</h4>
-            <p id="gmail-status-text">Connectez votre Gmail pour recevoir automatiquement les messages Airbnb dans vos conversations.</p>
+            <h4>Gmail — Notifications Airbnb / Booking</h4>
+            <p id="gmail-status-text">Aucun compte Gmail connecté. Connectez votre Gmail pour importer automatiquement vos conversations.</p>
           </div>
           <button class="btn btn-sm btn-primary" id="gmail-connect-btn" onclick="connectGmail()" aria-label="Connecter Gmail">
             Connecter Gmail
@@ -270,6 +283,87 @@
           </button>
         </div>
       </div>
+
+      <!-- Carte : Compte Airbnb -->
+      <div class="card mb-3">
+        <div class="card-header" style="display:flex;align-items:center;gap:10px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--clr-primary)" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
+          <h3 class="card-title">Compte Airbnb — Importer tous mes logements</h3>
+        </div>
+        <div style="margin-top:12px;">
+
+          <div id="settings-airbnb-saved-banner" class="hidden" style="background:color-mix(in srgb,var(--clr-accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--clr-accent) 30%,transparent);border-radius:var(--radius-md);padding:10px 14px;font-size:.83rem;color:var(--clr-accent);margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+            <i data-lucide="check-circle" style="width:16px;height:16px;flex-shrink:0;"></i>
+            <span id="settings-airbnb-saved-text"></span>
+          </div>
+
+          <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;font-size:.83rem;color:var(--clr-text-muted);line-height:1.8;">
+            <strong style="color:var(--clr-text);display:block;margin-bottom:10px;font-size:.9rem;">🔍 Comment obtenir votre URL de profil Airbnb ?</strong>
+
+            <div style="background:color-mix(in srgb,var(--clr-primary) 8%,transparent);border:1px solid color-mix(in srgb,var(--clr-primary) 25%,transparent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;">
+              <p style="margin:0 0 6px;font-weight:700;color:var(--clr-text);">⚡ Méthode — 3 clics depuis le tableau de bord hôte</p>
+              <ol style="margin:0;padding-left:18px;">
+                <li>Ouvrez votre espace hôte Airbnb :<br>
+                  <a href="https://www.airbnb.fr/hosting" target="_blank" rel="noopener noreferrer"
+                     style="color:var(--clr-primary);text-decoration:underline;font-weight:700;">airbnb.fr/hosting</a>
+                </li>
+                <li>En haut à droite, cliquez sur votre <strong>photo de profil</strong>.</li>
+                <li>Dans le menu déroulant, cliquez sur <strong>« Voir le profil »</strong>.</li>
+                <li>Votre profil public s'ouvre. Copiez l'URL dans la barre d'adresse ↓<br>
+                  <code style="background:var(--clr-bg);padding:2px 6px;border-radius:4px;font-size:.8rem;">https://www.airbnb.fr/users/show/<strong>123456789</strong></code>
+                </li>
+              </ol>
+            </div>
+
+            <p style="margin:0;font-size:.8rem;">💡 Si vous étiez déjà sur votre profil public Airbnb dans un autre onglet, il suffit de copier l'URL directement depuis cet onglet — elle contient déjà <code style="background:var(--clr-bg);padding:1px 4px;border-radius:3px;">/users/show/</code>.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="settings-airbnb-url">Votre URL de profil hôte Airbnb</label>
+            <input type="url" id="settings-airbnb-url" placeholder="https://www.airbnb.fr/users/show/123456789" autocomplete="off">
+            <span class="form-hint">L'URL doit contenir <strong>/users/show/</strong> suivi de votre identifiant numérique.</span>
+          </div>
+
+          <div id="settings-airbnb-error" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
+          <div id="settings-airbnb-success" class="alert alert-success hidden" role="status" aria-live="polite"></div>
+
+          <button id="settings-airbnb-btn" type="button" class="btn btn-primary" onclick="syncAirbnbProfileFromSettings()" style="display:flex;align-items:center;gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg>
+            Synchroniser tous mes logements
+          </button>
+
+          <!-- Grille des résultats -->
+          <div id="settings-airbnb-grid" class="hidden" style="margin-top:18px;">
+            <div id="settings-airbnb-grid-header" style="margin-bottom:10px;font-size:.88rem;font-weight:600;color:var(--clr-text);"></div>
+            <div id="settings-airbnb-grid-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Sécurité — Changer le mot de passe</h3></div>
+        <div style="margin-top:12px;">
+          <div id="pw-change-error" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
+          <div id="pw-change-success" class="alert alert-success hidden" role="status" aria-live="polite"></div>
+          <div class="form-group">
+            <label for="current-password">Mot de passe actuel</label>
+            <input type="password" id="current-password" autocomplete="current-password" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label for="new-password">Nouveau mot de passe</label>
+            <input type="password" id="new-password" autocomplete="new-password" placeholder="8+ caractères, 1 maj, 1 chiffre">
+          </div>
+          <div class="form-group">
+            <label for="new-password-confirm">Confirmer le nouveau mot de passe</label>
+            <input type="password" id="new-password-confirm" autocomplete="new-password" placeholder="••••••••">
+          </div>
+          <button type="button" class="btn btn-primary" id="change-pw-btn" onclick="submitPasswordChange()" style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="lock" style="width:18px;height:18px;"></i> Modifier le mot de passe
+          </button>
+          <p style="font-size:.78rem;color:var(--clr-text-muted);margin-top:10px;">Règles : minimum 8 caractères, au moins 1 majuscule et 1 chiffre. Un email de confirmation vous sera envoyé.</p>
+        </div>
+      </div>
     </section>
 
   </main>
@@ -293,16 +387,29 @@
     <div class="modal-body">
             <!-- Etape 1 : URL profil hote ou logement -->
       <div id="import-step-url">
-        <p style="font-size:.9rem;color:var(--clr-text-muted);margin-bottom:14px;">Copiez votre <strong>URL de profil hôte</strong> pour voir tous vos logements d&rsquo;un coup, ou l&rsquo;URL d&rsquo;un logement spécifique.</p>
-        <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:12px 14px;margin-bottom:16px;font-size:.82rem;color:var(--clr-text-muted);line-height:1.6;">
-          <strong>Où trouver votre URL de profil ?</strong><br>
-          Airbnb &rarr; votre photo &rarr; &laquo;&nbsp;Voir le profil&nbsp;&raquo; &rarr; copier l&rsquo;URL<br>
-          <span style="font-family:monospace;font-size:.78rem;opacity:.8;">Ex : airbnb.fr/users/show/123456789</span>
+        <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;font-size:.83rem;color:var(--clr-text-muted);line-height:1.75;">
+          <strong style="color:var(--clr-text);display:block;margin-bottom:10px;font-size:.9rem;">📋 Comment trouver le lien de votre logement ?</strong>
+
+          <p style="margin:0 0 6px;font-weight:600;color:var(--clr-text);">Méthode la plus simple — un logement à la fois :</p>
+          <ol style="margin:0 0 10px;padding-left:18px;">
+            <li>Ouvrez votre espace hôte Airbnb →
+              <a href="https://www.airbnb.fr/hosting/listings" target="_blank" rel="noopener noreferrer"
+                 style="color:var(--clr-primary);text-decoration:underline;font-weight:600;">airbnb.fr/hosting/listings</a>
+            </li>
+            <li>Cliquez sur le logement à importer pour ouvrir son tableau de bord.</li>
+            <li>En haut à droite, cliquez sur <strong>«&nbsp;Voir l'annonce&nbsp;»</strong> <em>(icône œil ou bouton «&nbsp;Aperçu&nbsp;»)</em> — la page publique s'ouvre.</li>
+            <li>Copiez l'URL dans la barre d'adresse : elle ressemble à ↓</li>
+          </ol>
+          <div style="padding:7px 12px;background:var(--clr-bg);border-radius:6px;font-family:monospace;font-size:.8rem;border:1px dashed var(--clr-border);">
+            https://www.airbnb.fr/rooms/<strong>987654321</strong>
+          </div>
+
+          <p style="margin-top:10px;margin-bottom:0;font-size:.8rem;">✅ Ce logement sera rattaché <strong>uniquement à votre compte</strong>. Pour importer <em>tous</em> vos logements d'un coup, utilisez la section <strong>Paramètres</strong>.</p>
         </div>
         <div class="form-group">
-          <label for="airbnb-url-input">URL Airbnb (profil hôte ou logement)</label>
-          <input type="url" id="airbnb-url-input" placeholder="https://www.airbnb.fr/users/show/123456..." autocomplete="off">
-          <span class="form-hint">Profil = tous vos logements &bull; airbnb.fr/rooms/12345 = un seul logement</span>
+          <label for="airbnb-url-input">Collez le lien Airbnb ici</label>
+          <input type="url" id="airbnb-url-input" placeholder="https://www.airbnb.fr/rooms/987654321" autocomplete="off">
+          <span class="form-hint">Exécution : airbnb.fr/rooms/<strong>12345</strong> &mdash; un seul logement à la fois</span>
         </div>
         <div id="import-error" class="alert alert-error hidden" role="alert"></div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
@@ -1821,7 +1928,8 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   }
 
   // ---- New Property modal ----
-  document.getElementById('new-property-btn').addEventListener('click', () => {
+  const _newPropBtn = document.getElementById('new-property-btn');
+  if (_newPropBtn) _newPropBtn.addEventListener('click', () => {
     document.getElementById('new-property-modal').classList.remove('hidden');
     document.getElementById('property-name').focus();
   });
@@ -2488,6 +2596,139 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   }
 
   startDashboardAutoRefresh();
+
+  // ---- Password change ----
+  async function submitPasswordChange() {
+    const currentPw  = document.getElementById('current-password').value;
+    const newPw      = document.getElementById('new-password').value;
+    const confirmPw  = document.getElementById('new-password-confirm').value;
+    const errDiv     = document.getElementById('pw-change-error');
+    const successDiv = document.getElementById('pw-change-success');
+    const btn        = document.getElementById('change-pw-btn');
+
+    errDiv.classList.add('hidden');
+    successDiv.classList.add('hidden');
+
+    if (!currentPw || !newPw || !confirmPw) {
+      errDiv.textContent = 'Tous les champs sont requis.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      errDiv.textContent = 'Les nouveaux mots de passe ne correspondent pas.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+    if (newPw.length < 8) {
+      errDiv.textContent = 'Le nouveau mot de passe doit contenir au moins 8 caractères.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+    if (!/[A-Z]/.test(newPw) || !/[0-9]/.test(newPw)) {
+      errDiv.textContent = 'Le mot de passe doit contenir au moins 1 majuscule et 1 chiffre.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Modification...';
+    try {
+      await apiRequest('/api/auth/password', { method: 'PUT', body: { currentPassword: currentPw, newPassword: newPw, confirmPassword: confirmPw } });
+      successDiv.textContent = 'Mot de passe modifié avec succès. Un email de confirmation a été envoyé.';
+      successDiv.classList.remove('hidden');
+      document.getElementById('current-password').value = '';
+      document.getElementById('new-password').value = '';
+      document.getElementById('new-password-confirm').value = '';
+    } catch (err) {
+      errDiv.textContent = err.message || 'Erreur lors du changement de mot de passe.';
+      errDiv.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="lock" style="width:18px;height:18px;"></i> Modifier le mot de passe';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+  }
+
+  // ---- Settings: Airbnb profile sync ----
+  (function initAirbnbSettings() {
+    const saved = localStorage.getItem('airbnb_profile_url');
+    if (saved) {
+      const input = document.getElementById('settings-airbnb-url');
+      if (input) input.value = saved;
+      const banner = document.getElementById('settings-airbnb-saved-banner');
+      const bannerText = document.getElementById('settings-airbnb-saved-text');
+      if (banner && bannerText) {
+        bannerText.textContent = 'URL enregistrée : ' + saved;
+        banner.classList.remove('hidden');
+      }
+    }
+  })();
+
+  async function syncAirbnbProfileFromSettings() {
+    const url = (document.getElementById('settings-airbnb-url').value || '').trim();
+    const errDiv     = document.getElementById('settings-airbnb-error');
+    const successDiv = document.getElementById('settings-airbnb-success');
+    const btn        = document.getElementById('settings-airbnb-btn');
+
+    errDiv.classList.add('hidden');
+    successDiv.classList.add('hidden');
+
+    if (!url) {
+      errDiv.textContent = 'Veuillez coller votre URL de profil hôte Airbnb.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+    if (!/\/users?\/show\//i.test(url)) {
+      errDiv.textContent = 'URL invalide. Elle doit contenir "/users/show/" suivi de votre identifiant. Suivez les instructions ci-dessus.';
+      errDiv.classList.remove('hidden');
+      return;
+    }
+
+    // Save URL to localStorage
+    localStorage.setItem('airbnb_profile_url', url);
+    const banner = document.getElementById('settings-airbnb-saved-banner');
+    const bannerText = document.getElementById('settings-airbnb-saved-text');
+    if (banner && bannerText) {
+      bannerText.textContent = 'URL enregistrée : ' + url;
+      banner.classList.remove('hidden');
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Synchronisation en cours…';
+
+    try {
+      const result = await apiRequest('/api/properties/scan-airbnb-profile', { method: 'POST', body: { profileUrl: url } });
+      renderSettingsListingGrid(result.listings, result.total);
+      if (result.total === 0) {
+        successDiv.textContent = 'Aucun logement trouvé pour ce profil. Vérifiez l\'URL.';
+      } else {
+        successDiv.textContent = result.total + ' logement' + (result.total > 1 ? 's' : '') + ' trouvé' + (result.total > 1 ? 's' : '') + '. Cliquez sur « Importer » pour les ajouter.';
+      }
+      successDiv.classList.remove('hidden');
+    } catch(err) {
+      errDiv.textContent = err.message || 'Erreur lors de la synchronisation. Vérifiez votre URL et réessayez.';
+      errDiv.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.086 14.754c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-1.968 4.297v.002l-.001.002zm8.644 0c-.608 1.327-1.93 1.327-2.538 0l-3.43-7.484c-.265-.578.054-1.27.68-1.27.28 0 .541.162.668.42l2.62 5.722 2.62-5.722a.74.74 0 01.668-.42c.626 0 .945.692.68 1.27l-3.43 7.484z"/></svg> Synchroniser tous mes logements';
+    }
+  }
+
+  function renderSettingsListingGrid(listings, total) {
+    const header = document.getElementById('settings-airbnb-grid-header');
+    const list   = document.getElementById('settings-airbnb-grid-list');
+    const grid   = document.getElementById('settings-airbnb-grid');
+    header.textContent = total + ' logement' + (total > 1 ? 's' : '') + ' trouvé' + (total > 1 ? 's' : '') + ' sur votre profil :';
+    list.innerHTML = listings.map(l => {
+      const name = l.name || ('Logement #' + l.id);
+      return `<div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 12px;display:flex;flex-direction:column;gap:10px;">
+        <div style="font-size:.82rem;font-weight:600;color:var(--clr-text);line-height:1.3;">${escapeHtml(name)}</div>
+        <div style="font-size:.72rem;color:var(--clr-text-muted);">#${l.id}</div>
+        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:auto;" onclick="importSingleListing('${l.id}', this)">Importer</button>
+      </div>`;
+    }).join('');
+    grid.classList.remove('hidden');
+  }
 
   // ---- Gmail integration ----
   async function connectGmail() {
