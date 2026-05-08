@@ -2197,6 +2197,7 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
 
   // ---- Airbnb Import ----
   let importedData = null;
+  let importedPhotos = [];  // photos renvoyées par /import-airbnb
 
   document.getElementById('import-airbnb-btn').addEventListener('click', () => {
     document.getElementById('import-airbnb-modal').classList.remove('hidden');
@@ -2214,6 +2215,7 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     document.getElementById('import-airbnb-modal').classList.add('hidden');
     resetImportModal();
     importedData = null;
+    importedPhotos = [];
   }
   function resetImportModal() {
     document.getElementById('import-step-url').classList.remove('hidden');
@@ -2257,7 +2259,8 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
         // === Mode logement unique ===
         const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url } });
         importedData = result.data;
-        renderImportPreview(result.data, result.warning);
+        importedPhotos = result.photos || [];
+        renderImportPreview(result.data, result.warning, importedPhotos);
         document.getElementById('import-step-url').classList.add('hidden');
         document.getElementById('import-step-preview').classList.remove('hidden');
         if (result.warning) {
@@ -2294,29 +2297,15 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     try {
       const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url: listingId } });
       const d = result.data;
-      await apiRequest('/api/properties', {
-        method: 'POST',
-        body: {
-          name: d.name, property_type: d.property_type,
-          bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
-          address: d.address || '', description: d.description || '', house_rules: d.house_rules || '',
-          check_in_time: d.check_in_time || '', check_out_time: d.check_out_time || '', nearby: d.nearby || '',
-          has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
-          has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
-          has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning,
-          has_heating: d.has_heating, has_workspace: d.has_workspace,
-          has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron,
-          has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
-          has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave,
-          has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
-          has_smoke_detector: d.has_smoke_detector, has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
-          has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
-          has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden,
-          has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
-          allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
-          airbnb_listing_id: d.airbnb_listing_id, auto_reply_enabled: false, reply_tone: 'friendly'
-        }
-      });
+      const photos = result.photos || [];
+      const payload = _buildImportPayload(d, photos);
+      const importResult = await apiRequest('/api/properties/confirm-import', { method: 'POST', body: payload });
+      if (importResult.alreadyExists) {
+        btn.disabled = false;
+        btn.textContent = 'Déjà importé';
+        toast('info', 'Ce logement est déjà sur votre compte.');
+        return;
+      }
       btn.textContent = '✓ Importé';
       btn.style.background = 'var(--clr-accent)';
       btn.style.borderColor = 'var(--clr-accent)';
@@ -2329,12 +2318,39 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     }
   }
 
-  function renderImportPreview(d, warning) {
+  function renderImportPreview(d, warning, photos) {
+    photos = photos || [];
     const yesNo = val => val ? '<span style="color:var(--clr-accent)">✓</span>' : '<span style="color:var(--clr-text-light)">–</span>';
-    const confidence = { high: 'Données complètes', low: 'Données partielles', none: 'À compléter manuellement' };
+    const confidence = { high: 'Données complètes', medium: 'Données partielles', low: 'Données partielles', none: 'À compléter manuellement' };
     const confBadge = confidence[d._confidence || 'none'];
     const typeLabels = { apartment:'Appartement', house:'Maison', villa:'Villa', studio:'Studio', loft:'Loft', chalet:'Chalet' };
     const truncate = (str, n) => str && str.length > n ? str.slice(0, n) + '…' : str || '';
+
+    // Photos HTML
+    let photosHtml = '';
+    if (photos.length > 0) {
+      const grid = photos.slice(0, 12).map((p, i) => `
+        <div id="preview-photo-${i}" style="position:relative;border-radius:8px;overflow:hidden;border:2px solid ${p.is_main ? 'var(--clr-primary)' : 'var(--clr-border)'};aspect-ratio:4/3;background:#111;">
+          <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.alt || '')}" loading="lazy"
+            style="width:100%;height:100%;object-fit:cover;display:block;"
+            onerror="this.parentElement.style.display='none'">
+          ${p.is_main ? '<div style="position:absolute;top:4px;left:4px;background:var(--clr-primary);color:#fff;font-size:.65rem;padding:2px 6px;border-radius:4px;font-weight:600;">Principale</div>' : ''}
+          <div style="position:absolute;top:4px;right:4px;display:flex;gap:4px;">
+            ${!p.is_main ? `<button onclick="setPreviewMainPhoto(${i})" title="Définir comme principale"
+              style="background:rgba(0,0,0,.55);border:none;border-radius:4px;color:#fff;font-size:.75rem;padding:2px 6px;cursor:pointer;backdrop-filter:blur(4px);">⭐</button>` : ''}
+            <button onclick="removePreviewPhoto(${i})" title="Retirer cette photo"
+              style="background:rgba(0,0,0,.55);border:none;border-radius:4px;color:#fff;font-size:.75rem;padding:2px 6px;cursor:pointer;backdrop-filter:blur(4px);">✕</button>
+          </div>
+        </div>`).join('');
+      photosHtml = `
+        <div style="margin-top:14px;border-top:1px solid var(--clr-border);padding-top:12px;">
+          <div style="font-size:.82rem;font-weight:600;color:var(--clr-text);margin-bottom:8px;">📷 Photos (${photos.length})
+            <span style="font-weight:400;color:var(--clr-text-muted);font-size:.75rem;"> — cliquez ⭐ pour choisir la photo principale, ✕ pour retirer</span>
+          </div>
+          <div id="import-photos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;">${grid}</div>
+        </div>`;
+    }
+
     document.getElementById('import-preview-card').innerHTML = `
       <div class="import-preview-header">
         <div>
@@ -2383,7 +2399,24 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
       ${d.address ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:10px;">${escapeHtml(d.address)}</div>` : ''}
       ${d.description ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;border-top:1px solid var(--clr-border);padding-top:8px;"><strong style="color:var(--clr-text);">Description :</strong> ${escapeHtml(truncate(d.description, 200))}</div>` : ''}
       ${d.house_rules ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;"><strong style="color:var(--clr-text);">Règles :</strong> ${escapeHtml(truncate(d.house_rules, 180))}</div>` : ''}
+      ${photosHtml}
     `;
+  }
+
+  // Remove a photo from the preview (only modifies importedPhotos)
+  function removePreviewPhoto(idx) {
+    importedPhotos.splice(idx, 1);
+    // Re-index is_main
+    if (importedPhotos.length > 0 && !importedPhotos.some(p => p.is_main)) {
+      importedPhotos[0].is_main = true;
+    }
+    renderImportPreview(importedData, null, importedPhotos);
+  }
+
+  // Set a photo as the main photo in the preview
+  function setPreviewMainPhoto(idx) {
+    importedPhotos.forEach((p, i) => { p.is_main = (i === idx); });
+    renderImportPreview(importedData, null, importedPhotos);
   }
 
   function _prefillPropertyForm(d) {
@@ -2419,6 +2452,36 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     sc('allows-events', d.allows_events);
   }
 
+  // Build the confirm-import payload from importedData + importedPhotos
+  function _buildImportPayload(d, photos) {
+    return {
+      airbnb_listing_id: d.airbnb_listing_id,
+      name: d.name, property_type: d.property_type,
+      bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
+      address: d.address || '', description: d.description || '',
+      house_rules: d.house_rules || '', check_in_time: d.check_in_time || '',
+      check_out_time: d.check_out_time || '', nearby: d.nearby || '',
+      source_url: d.source_url || '', city: d.city || '', country: d.country || '',
+      rating: d.rating || null, review_count: d.review_count || 0,
+      photos: (photos || []).map((p, i) => ({ ...p, position: i })),
+      has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
+      has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
+      has_washing_machine: d.has_washing_machine, has_air_conditioning: d.has_air_conditioning,
+      has_heating: d.has_heating, has_workspace: d.has_workspace,
+      has_hair_dryer: d.has_hair_dryer, has_iron: d.has_iron,
+      has_bathtub: d.has_bathtub, has_dryer: d.has_dryer,
+      has_dishwasher: d.has_dishwasher, has_microwave: d.has_microwave,
+      has_refrigerator: d.has_refrigerator, has_coffee_maker: d.has_coffee_maker,
+      has_smoke_detector: d.has_smoke_detector,
+      has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
+      has_fire_extinguisher: d.has_fire_extinguisher, has_first_aid_kit: d.has_first_aid_kit,
+      has_bbq: d.has_bbq, has_terrace: d.has_terrace, has_garden: d.has_garden,
+      has_netflix: d.has_netflix, has_fireplace: d.has_fireplace,
+      allows_pets: d.allows_pets, allows_smoking: d.allows_smoking, allows_events: d.allows_events,
+      auto_reply_enabled: false, reply_tone: 'friendly',
+    };
+  }
+
   // Direct import — creates the property immediately, no second form needed
   async function confirmImport() {
     if (!importedData) return;
@@ -2426,59 +2489,22 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span> Importation...';
 
-    const d = importedData;
     try {
-      await apiRequest('/api/properties', {
-        method: 'POST',
-        body: {
-          name:             d.name,
-          property_type:    d.property_type,
-          bedrooms:         d.bedrooms,
-          beds:             d.beds,
-          bathrooms:        d.bathrooms,
-          max_guests:       d.max_guests,
-          address:          d.address         || '',
-          description:      d.description     || '',
-          house_rules:      d.house_rules     || '',
-          // Infos pratiques récupérées depuis Airbnb
-          check_in_time:    d.check_in_time   || '',
-          check_out_time:   d.check_out_time  || '',
-          nearby:           d.nearby          || '',
-          has_wifi:             d.has_wifi,
-          has_kitchen:          d.has_kitchen,
-          has_parking:          d.has_parking,
-          has_pool:             d.has_pool,
-          has_gym:              d.has_gym,
-          has_tv:               d.has_tv,
-          has_washing_machine:  d.has_washing_machine,
-          has_air_conditioning: d.has_air_conditioning,
-          has_heating:          d.has_heating,
-          has_workspace:        d.has_workspace,
-          has_hair_dryer:       d.has_hair_dryer,
-          has_iron:             d.has_iron,
-          has_bathtub:          d.has_bathtub,
-          has_dryer:            d.has_dryer,
-          has_dishwasher:       d.has_dishwasher,
-          has_microwave:        d.has_microwave,
-          has_refrigerator:     d.has_refrigerator,
-          has_coffee_maker:     d.has_coffee_maker,
-          has_smoke_detector:   d.has_smoke_detector,
-          has_carbon_monoxide_detector: d.has_carbon_monoxide_detector,
-          has_fire_extinguisher: d.has_fire_extinguisher,
-          has_first_aid_kit:    d.has_first_aid_kit,
-          has_bbq:              d.has_bbq,
-          has_terrace:          d.has_terrace,
-          has_garden:           d.has_garden,
-          has_netflix:          d.has_netflix,
-          has_fireplace:        d.has_fireplace,
-          allows_pets:          d.allows_pets,
-          allows_smoking:       d.allows_smoking,
-          allows_events:        d.allows_events,
-          airbnb_listing_id:    d.airbnb_listing_id,
-          auto_reply_enabled:   false,
-          reply_tone:           'friendly'
-        }
-      });
+      const payload = _buildImportPayload(importedData, importedPhotos);
+      const result = await apiRequest('/api/properties/confirm-import', { method: 'POST', body: payload });
+
+      if (result.alreadyExists) {
+        // Propose update
+        btn.disabled = false;
+        btn.textContent = '✓ Importer maintenant';
+        const w = document.getElementById('import-warning');
+        w.innerHTML = `⚠️ Ce logement existe déjà sur votre compte.
+          <button class="btn btn-sm btn-outline" style="margin-left:8px;"
+            onclick="updateExistingProperty(${result.existingId})">Mettre à jour</button>`;
+        w.classList.remove('hidden');
+        return;
+      }
+
       closeImportModal();
       toast('success', 'Logement importé avec succès !');
       await loadProperties();
@@ -2486,6 +2512,18 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
       toast('error', err.message || 'Erreur lors de l\'importation.');
       btn.disabled = false;
       btn.textContent = '✓ Importer maintenant';
+    }
+  }
+
+  // Update an already-imported property with fresh Airbnb data
+  async function updateExistingProperty(propertyId) {
+    try {
+      await apiRequest('/api/properties/' + propertyId + '/update-from-airbnb', { method: 'PUT' });
+      closeImportModal();
+      toast('success', 'Logement mis à jour depuis Airbnb !');
+      await loadProperties();
+    } catch (err) {
+      toast('error', err.message || 'Erreur lors de la mise à jour.');
     }
   }
 

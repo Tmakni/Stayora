@@ -604,7 +604,8 @@ async function importAirbnbListing(req, res) {
         parsed._source = 'airbnb_api';
         parsed._confidence = 'high';
         logger.info(`Airbnb import success via API for ${listingId}`);
-        return res.json({ success: true, data: parsed, listing_id: listingId });
+        const apiPhotos = extractPhotos(apiData, '');
+        return res.json({ success: true, data: parsed, listing_id: listingId, photos: apiPhotos });
       }
     }
   } catch (apiErr) {
@@ -658,7 +659,8 @@ async function importAirbnbListing(req, res) {
         const parsed = parseListing(nextData, listingId);
         if (parsed) {
           logger.info(`Airbnb import success via __NEXT_DATA__ for ${listingId}`);
-          return res.json({ success: true, data: parsed, listing_id: listingId });
+          const ndPhotos = extractPhotos(nextData, html);
+          return res.json({ success: true, data: parsed, listing_id: listingId, photos: ndPhotos });
         }
       } catch (parseErr) {
         logger.warn(`__NEXT_DATA__ parse error: ${parseErr.message}`);
@@ -673,7 +675,8 @@ async function importAirbnbListing(req, res) {
         const parsed = parseListing(d, listingId);
         if (parsed && parsed.name && !parsed.name.includes('#' + listingId)) {
           logger.info(`Airbnb import success via JSON blob for ${listingId}`);
-          return res.json({ success: true, data: parsed, listing_id: listingId });
+          const blobPhotos = extractPhotos(d, html);
+          return res.json({ success: true, data: parsed, listing_id: listingId, photos: blobPhotos });
         }
       } catch (_) {}
     }
@@ -682,21 +685,24 @@ async function importAirbnbListing(req, res) {
     const deferredParsed = parseDeferredState(html, listingId);
     if (deferredParsed && deferredParsed.name && !deferredParsed.name.includes('#' + listingId)) {
       logger.info(`Airbnb import success via deferred-state for ${listingId}`);
-      return res.json({ success: true, data: deferredParsed, listing_id: listingId });
+      const defPhotos = extractPhotos({}, html);
+      return res.json({ success: true, data: deferredParsed, listing_id: listingId, photos: defPhotos });
     }
 
     // Strategy 2c: Try JSON-LD Schema.org structured data
     const jsonLdParsed = parseJsonLd(html, listingId);
     if (jsonLdParsed && jsonLdParsed.name && !jsonLdParsed.name.includes('#' + listingId)) {
       logger.info(`Airbnb import success via JSON-LD for ${listingId}`);
-      return res.json({ success: true, data: jsonLdParsed, listing_id: listingId });
+      const ldPhotos = extractPhotos({}, html);
+      return res.json({ success: true, data: jsonLdParsed, listing_id: listingId, photos: ldPhotos });
     }
 
     // Strategy 3: Meta tags fallback (enriched — extracts counts from description)
     const metaParsed = parseMetaTags(html, listingId);
     if (metaParsed.name && !metaParsed.name.includes('#' + listingId)) {
       logger.info(`Airbnb import via meta tags for ${listingId}`);
-      return res.json({ success: true, data: metaParsed, listing_id: listingId });
+      const metaPhotos = extractPhotos({}, html);
+      return res.json({ success: true, data: metaParsed, listing_id: listingId, photos: metaPhotos });
     }
   }
 
@@ -805,4 +811,381 @@ async function scanAirbnbProfile(req, res) {
   return res.json({ success: true, listings, total: listings.length });
 }
 
-module.exports = { importAirbnbListing, scanAirbnbProfile };
+// ─── Photo extraction ────────────────────────────────────────────────────────
+
+/**
+ * Extract photos from Airbnb API data or parsed HTML blobs.
+ * Returns array of { url, position, alt }.
+ */
+function extractPhotos(rawData, html = '') {
+  const photos = [];
+  const seen = new Set();
+
+  const addPhoto = (url, position, alt = '') => {
+    if (!url || typeof url !== 'string') return;
+    // Normalise CDN URL — strip size suffix so we can request larger version
+    const clean = url.replace(/\?.*$/, '').replace(/_[a-z]\.\w+$/, '');
+    const base = clean || url;
+    if (seen.has(base)) return;
+    seen.add(base);
+    photos.push({ url, position, alt: alt || '' });
+  };
+
+  // --- Strategy 1: Airbnb API response (pdp_listing_detail or listing)
+  const tryObj = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    // Photos directly on listing
+    for (const key of ['photos', 'listing_photos', 'picture_urls', 'listingPhotos']) {
+      const arr = obj[key];
+      if (Array.isArray(arr)) {
+        arr.forEach((p, i) => {
+          const url = p?.large_url || p?.picture?.large || p?.picture?.url || p?.url || p?.baseUrl || (typeof p === 'string' ? p : null);
+          const alt = p?.caption || p?.picture?.caption || '';
+          addPhoto(url, i, alt);
+        });
+      }
+    }
+    // xl_picture_url / picture_url single fields
+    for (const key of ['xl_picture_url', 'picture_url', 'listingThumbnailUrl', 'thumbnail_url']) {
+      if (obj[key]) addPhoto(obj[key], photos.length, '');
+    }
+    // Nested pdp_listing_detail.photos
+    if (obj.pdp_listing_detail?.photos) tryObj({ photos: obj.pdp_listing_detail.photos });
+    if (obj.listing?.photos) tryObj({ photos: obj.listing.photos });
+  };
+
+  if (rawData) tryObj(rawData);
+
+  // --- Strategy 2: __NEXT_DATA__ / JSON blobs in HTML
+  if (html && photos.length < 3) {
+    const blobs = [
+      ...Array.from(html.matchAll(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/gi), m => m[1]),
+      ...Array.from(html.matchAll(/<script[^>]*>([\s\S]{1000,}?)<\/script>/gi), m => m[1]).slice(0, 5),
+    ];
+    for (const blob of blobs) {
+      try {
+        const data = JSON.parse(blob);
+        // Deep search for photo arrays
+        const findPhotos = (obj, depth = 0) => {
+          if (!obj || typeof obj !== 'object' || depth > 5) return;
+          for (const key of ['photos', 'listing_photos', 'picture_urls', 'listingPhotos']) {
+            if (Array.isArray(obj[key])) {
+              obj[key].forEach((p, i) => {
+                const url = p?.large_url || p?.picture?.large || p?.url || p?.baseUrl || (typeof p === 'string' ? p : null);
+                addPhoto(url, photos.length + i, p?.caption || '');
+              });
+            }
+          }
+          if (Array.isArray(obj)) obj.slice(0, 30).forEach(v => findPhotos(v, depth + 1));
+          else Object.values(obj).slice(0, 20).forEach(v => findPhotos(v, depth + 1));
+        };
+        findPhotos(data);
+        if (photos.length >= 3) break;
+      } catch (_) {}
+    }
+  }
+
+  // --- Strategy 3: og:image meta tag (last resort — single photo)
+  if (html && photos.length === 0) {
+    const m = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+    if (m && m[1]) addPhoto(m[1], 0, 'Photo principale');
+  }
+
+  // Re-index positions
+  return photos.slice(0, 25).map((p, i) => ({ ...p, position: i, is_main: i === 0 }));
+}
+
+// ─── Confirm import ──────────────────────────────────────────────────────────
+
+/**
+ * POST /api/properties/confirm-import
+ * Saves the previewed property + photos to the DB for the authenticated user.
+ * Anti-doublon : if user_id + airbnb_listing_id already exists, returns alreadyExists.
+ */
+async function confirmImport(req, res) {
+  const { getDatabase } = require('../config/db');
+  const db = getDatabase();
+  const userId = req.userId;
+  const body = req.body || {};
+
+  const {
+    airbnb_listing_id,
+    name, property_type, bedrooms, beds, bathrooms, max_guests,
+    address, description, house_rules, check_in_time, check_out_time, nearby,
+    source_url, city, country, rating, review_count,
+    photos = [],
+    // amenities
+    has_wifi, has_kitchen, has_parking, has_pool, has_gym, has_tv,
+    has_washing_machine, has_air_conditioning, has_heating, has_workspace,
+    has_hair_dryer, has_iron, has_bathtub, has_dryer, has_dishwasher,
+    has_microwave, has_refrigerator, has_coffee_maker, has_smoke_detector,
+    has_carbon_monoxide_detector, has_fire_extinguisher, has_first_aid_kit,
+    has_bbq, has_terrace, has_garden, has_netflix, has_fireplace,
+    allows_pets, allows_smoking, allows_events,
+    auto_reply_enabled, reply_tone,
+  } = body;
+
+  if (!name) return res.status(400).json({ error: 'Le nom du logement est requis.' });
+
+  // ── Anti-doublon ────────────────────────────────────────────────────────
+  if (airbnb_listing_id) {
+    const existing = await db.query(
+      'SELECT id FROM property_profiles WHERE user_id = ? AND airbnb_listing_id = ?',
+      [userId, String(airbnb_listing_id)]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({
+        success: false,
+        alreadyExists: true,
+        existingId: existing[0].id,
+        message: 'Ce logement Airbnb existe déjà sur votre compte. Voulez-vous le mettre à jour ?'
+      });
+    }
+  }
+
+  // ── Première photo comme main_photo_url ──────────────────────────────────
+  const mainPhoto = photos.find(p => p.is_main) || photos[0] || null;
+
+  try {
+    // ── Insérer le logement ───────────────────────────────────────────────
+    const result = await db.query(
+      `INSERT INTO property_profiles
+        (user_id, source, source_url, airbnb_listing_id,
+         name, property_type, bedrooms, beds, bathrooms, max_guests,
+         address, description, house_rules, check_in_time, check_out_time, nearby,
+         city, country, rating, review_count, main_photo_url,
+         has_wifi, has_kitchen, has_parking, has_pool, has_gym, has_tv,
+         has_washing_machine, has_air_conditioning, has_heating, has_workspace,
+         has_hair_dryer, has_iron, has_bathtub, has_dryer, has_dishwasher,
+         has_microwave, has_refrigerator, has_coffee_maker, has_smoke_detector,
+         has_carbon_monoxide_detector, has_fire_extinguisher, has_first_aid_kit,
+         has_bbq, has_terrace, has_garden, has_netflix, has_fireplace,
+         allows_pets, allows_smoking, allows_events,
+         auto_reply_enabled, reply_tone)
+       VALUES
+        (?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?,
+         ?, ?, ?, ?, ?,
+         ?, ?, ?, ?,
+         ?, ?, ?,
+         ?, ?, ?, ?, ?,
+         ?, ?, ?,
+         ?, ?)`,
+      [
+        userId, 'airbnb', source_url || null, airbnb_listing_id || null,
+        name, property_type || 'apartment',
+        parseInt(bedrooms) || 1, parseInt(beds) || 1,
+        parseFloat(bathrooms) || 1, parseInt(max_guests) || 2,
+        address || '', description || '', house_rules || '',
+        check_in_time || '', check_out_time || '', nearby || '',
+        city || null, country || null,
+        rating ? parseFloat(rating) : null,
+        review_count ? parseInt(review_count) : 0,
+        mainPhoto ? mainPhoto.url : null,
+        has_wifi ? 1 : 0, has_kitchen ? 1 : 0, has_parking ? 1 : 0,
+        has_pool ? 1 : 0, has_gym ? 1 : 0, has_tv ? 1 : 0,
+        has_washing_machine ? 1 : 0, has_air_conditioning ? 1 : 0,
+        has_heating ? 1 : 0, has_workspace ? 1 : 0,
+        has_hair_dryer ? 1 : 0, has_iron ? 1 : 0,
+        has_bathtub ? 1 : 0, has_dryer ? 1 : 0, has_dishwasher ? 1 : 0,
+        has_microwave ? 1 : 0, has_refrigerator ? 1 : 0,
+        has_coffee_maker ? 1 : 0, has_smoke_detector ? 1 : 0,
+        has_carbon_monoxide_detector ? 1 : 0,
+        has_fire_extinguisher ? 1 : 0, has_first_aid_kit ? 1 : 0,
+        has_bbq ? 1 : 0, has_terrace ? 1 : 0, has_garden ? 1 : 0,
+        has_netflix ? 1 : 0, has_fireplace ? 1 : 0,
+        allows_pets ? 1 : 0, allows_smoking ? 1 : 0, allows_events ? 1 : 0,
+        auto_reply_enabled ? 1 : 0, reply_tone || 'friendly',
+      ]
+    );
+
+    const propertyId = result.insertId;
+
+    // ── Insérer les photos ────────────────────────────────────────────────
+    if (photos.length > 0) {
+      for (const photo of photos.slice(0, 25)) {
+        if (!photo.url) continue;
+        await db.query(
+          `INSERT INTO property_photos
+            (property_id, user_id, source, source_url, image_url, position, alt, is_main)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            propertyId, userId,
+            photo.source || 'airbnb',
+            photo.source_url || photo.url,
+            photo.url,
+            photo.position || 0,
+            photo.alt || '',
+            photo.is_main ? 1 : 0,
+          ]
+        );
+      }
+    }
+
+    logger.info(`Property imported: id=${propertyId} user=${userId} airbnb=${airbnb_listing_id}`);
+    return res.status(201).json({
+      success: true,
+      propertyId,
+      message: 'Logement importé avec succès.',
+    });
+  } catch (err) {
+    logger.error('confirmImport error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de la sauvegarde du logement.' });
+  }
+}
+
+// ─── Update from Airbnb ──────────────────────────────────────────────────────
+
+/**
+ * PUT /api/properties/:id/update-from-airbnb
+ * Re-fetches Airbnb data and updates the property (ownership enforced).
+ */
+async function updateFromAirbnb(req, res) {
+  const { getDatabase } = require('../config/db');
+  const db = getDatabase();
+  const userId = req.userId;
+  const propertyId = parseInt(req.params.id, 10);
+
+  // Ownership check
+  const props = await db.query(
+    'SELECT id, airbnb_listing_id FROM property_profiles WHERE id = ? AND user_id = ?',
+    [propertyId, userId]
+  );
+  if (!props.length) return res.status(403).json({ error: 'Accès refusé ou logement introuvable.' });
+
+  const listingId = props[0].airbnb_listing_id;
+  if (!listingId) return res.status(400).json({ error: "Ce logement n'a pas d'identifiant Airbnb." });
+
+  // Re-fetch
+  let parsed = null;
+  try {
+    const apiData = await fetchViaAirbnbApi(listingId);
+    if (apiData) parsed = parseListing(apiData, listingId);
+  } catch (_) {}
+
+  if (!parsed) return res.status(502).json({ error: "Impossible de récupérer les données Airbnb. Réessayez plus tard." });
+
+  try {
+    await db.query(
+      `UPDATE property_profiles SET
+        name=?, description=?, house_rules=?, address=?,
+        bedrooms=?, beds=?, bathrooms=?, max_guests=?,
+        has_wifi=?, has_kitchen=?, has_parking=?, has_pool=?,
+        has_air_conditioning=?, has_heating=?, has_tv=?,
+        check_in_time=?, check_out_time=?
+       WHERE id = ? AND user_id = ?`,
+      [
+        parsed.name, parsed.description, parsed.house_rules, parsed.address,
+        parsed.bedrooms, parsed.beds, parsed.bathrooms, parsed.max_guests,
+        parsed.has_wifi ? 1 : 0, parsed.has_kitchen ? 1 : 0,
+        parsed.has_parking ? 1 : 0, parsed.has_pool ? 1 : 0,
+        parsed.has_air_conditioning ? 1 : 0, parsed.has_heating ? 1 : 0,
+        parsed.has_tv ? 1 : 0,
+        parsed.check_in_time || '', parsed.check_out_time || '',
+        propertyId, userId,
+      ]
+    );
+    logger.info(`Property ${propertyId} updated from Airbnb`);
+    return res.json({ success: true, message: 'Logement mis à jour depuis Airbnb.' });
+  } catch (err) {
+    logger.error('updateFromAirbnb error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de la mise à jour.' });
+  }
+}
+
+// ─── Photo management ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/properties/:id/photos
+ * Returns photos for a property (ownership enforced).
+ */
+async function getPropertyPhotos(req, res) {
+  const { getDatabase } = require('../config/db');
+  const db = getDatabase();
+  const userId = req.userId;
+  const propertyId = parseInt(req.params.id, 10);
+
+  // Ownership check
+  const props = await db.query(
+    'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+    [propertyId, userId]
+  );
+  if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
+
+  const photos = await db.query(
+    'SELECT * FROM property_photos WHERE property_id = ? AND user_id = ? ORDER BY position ASC',
+    [propertyId, userId]
+  );
+  return res.json({ photos });
+}
+
+/**
+ * DELETE /api/properties/:id/photos/:photoId
+ * Deletes a photo (ownership enforced on both property and photo).
+ */
+async function deletePropertyPhoto(req, res) {
+  const { getDatabase } = require('../config/db');
+  const db = getDatabase();
+  const userId = req.userId;
+  const propertyId = parseInt(req.params.id, 10);
+  const photoId = parseInt(req.params.photoId, 10);
+
+  const result = await db.query(
+    'DELETE FROM property_photos WHERE id = ? AND property_id = ? AND user_id = ?',
+    [photoId, propertyId, userId]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'Photo introuvable.' });
+  return res.json({ success: true });
+}
+
+/**
+ * PUT /api/properties/:id/photos/:photoId/main
+ * Sets a photo as the main photo for a property.
+ */
+async function setMainPhoto(req, res) {
+  const { getDatabase } = require('../config/db');
+  const db = getDatabase();
+  const userId = req.userId;
+  const propertyId = parseInt(req.params.id, 10);
+  const photoId = parseInt(req.params.photoId, 10);
+
+  // Ownership check
+  const props = await db.query(
+    'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+    [propertyId, userId]
+  );
+  if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
+
+  // Unset all, then set selected
+  await db.query('UPDATE property_photos SET is_main = 0 WHERE property_id = ? AND user_id = ?', [propertyId, userId]);
+  const r = await db.query(
+    'UPDATE property_photos SET is_main = 1 WHERE id = ? AND property_id = ? AND user_id = ?',
+    [photoId, propertyId, userId]
+  );
+  if (!r.affectedRows) return res.status(404).json({ error: 'Photo introuvable.' });
+
+  // Update main_photo_url on the property
+  const photo = await db.query('SELECT image_url FROM property_photos WHERE id = ?', [photoId]);
+  if (photo.length) {
+    await db.query(
+      'UPDATE property_profiles SET main_photo_url = ? WHERE id = ? AND user_id = ?',
+      [photo[0].image_url, propertyId, userId]
+    );
+  }
+  return res.json({ success: true });
+}
+
+module.exports = {
+  importAirbnbListing,
+  scanAirbnbProfile,
+  confirmImport,
+  updateFromAirbnb,
+  getPropertyPhotos,
+  deletePropertyPhoto,
+  setMainPhoto,
+  extractPhotos,
+};
