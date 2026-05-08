@@ -407,7 +407,12 @@ async function createProperty(req, res) {
       auto_reply_enabled,
       reply_tone,
       // Import Airbnb
-      airbnb_listing_id
+      airbnb_listing_id,
+      source,
+      source_url,
+      city,
+      country,
+      photos
     } = req.body;
 
     // Validation des champs obligatoires
@@ -415,6 +420,21 @@ async function createProperty(req, res) {
       return res.status(400).json({
         error: 'Les champs nom, type de propriété, chambres, lits, salles de bain et nombre maximum d\'invités sont obligatoires'
       });
+    }
+
+    // Anti-doublon Airbnb : même user, même listing_id
+    if (airbnb_listing_id) {
+      const existing = await db.query(
+        'SELECT id FROM property_profiles WHERE user_id = ? AND airbnb_listing_id = ? LIMIT 1',
+        [userId, String(airbnb_listing_id)]
+      );
+      if (existing.length > 0) {
+        return res.status(409).json({
+          alreadyExists: true,
+          existingId: existing[0].id,
+          message: 'Ce logement Airbnb existe déjà sur votre compte.'
+        });
+      }
     }
 
     // Récupérer tous les champs context-only depuis le body
@@ -446,9 +466,14 @@ async function createProperty(req, res) {
         has_smoke_detector, has_carbon_monoxide_detector, has_fire_extinguisher, has_first_aid_kit,
         has_bbq, has_terrace, has_garden, has_netflix, has_fireplace,
         allows_pets, allows_smoking, allows_events,
-        address, description, house_rules, auto_reply_enabled, reply_tone, context_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        address, description, house_rules, auto_reply_enabled, reply_tone, context_json,
+        source, source_url, airbnb_listing_id, city, country, main_photo_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
+
+    // Determine main photo URL for quick display
+    const mainPhoto = Array.isArray(photos) ? photos.find(p => p.is_main) || photos[0] : null;
+    const mainPhotoUrl = mainPhoto ? (mainPhoto.url || null) : null;
 
     const result = await db.query(query, [
       userId, name, property_type, bedrooms, beds, bathrooms, max_guests,
@@ -461,8 +486,32 @@ async function createProperty(req, res) {
       !!allows_pets, !!allows_smoking, !!allows_events,
       address || null, description || null, house_rules || null,
       !!auto_reply_enabled, reply_tone || 'professional',
-      JSON.stringify(contextData)
+      JSON.stringify(contextData),
+      source || null, source_url || null,
+      airbnb_listing_id ? String(airbnb_listing_id) : null,
+      city || null, country || null, mainPhotoUrl
     ]);
+
+    // Save imported photos
+    if (Array.isArray(photos) && photos.length > 0 && result.insertId) {
+      const propId = result.insertId;
+      for (const photo of photos.slice(0, 25)) {
+        if (!photo.url) continue;
+        await db.query(
+          `INSERT INTO property_photos (property_id, user_id, source, source_url, image_url, position, alt, is_main)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            propId, userId,
+            photo.source || 'airbnb',
+            photo.url,
+            photo.url,
+            photo.position != null ? photo.position : 0,
+            photo.alt || '',
+            photo.is_main ? 1 : 0
+          ]
+        );
+      }
+    }
 
     logger.info(`Property created: ${result ? result.insertId : 'NO_RESULT'} by user ${userId}`);
 

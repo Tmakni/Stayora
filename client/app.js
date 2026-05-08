@@ -42,7 +42,10 @@ async function apiRequest(url, options = {}) {
     const data = await response.json();
     
     if (!response.ok) {
-      throw new Error(data.error || 'Request failed');
+      const err = new Error(data.error || data.message || 'Request failed');
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     
     if (Array.isArray(data)) {

@@ -385,7 +385,7 @@
       <button class="btn btn-ghost btn-icon" id="close-import-modal-btn" aria-label="Fermer">✕</button>
     </div>
     <div class="modal-body">
-            <!-- Etape 1 : URL profil hote ou logement -->
+            <!-- Etape 1 : URL logement unique -->
       <div id="import-step-url">
         <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;font-size:.83rem;color:var(--clr-text-muted);line-height:1.75;">
           <strong style="color:var(--clr-text);display:block;margin-bottom:10px;font-size:.9rem;">📋 Comment trouver le lien de votre logement ?</strong>
@@ -415,31 +415,17 @@
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
           <button type="button" class="btn btn-outline" onclick="closeImportModal()">Annuler</button>
           <button type="button" class="btn btn-primary" id="import-fetch-btn" onclick="fetchAirbnbListing()">
-            <span id="import-fetch-label">Continuer &rarr;</span>
+            <span id="import-fetch-label">Analyser et remplir le formulaire &rarr;</span>
           </button>
         </div>
       </div>
 
-      <!-- Etape 2a : Grille des logements (profil hote) -->
+      <!-- Etape 2 : Grille des logements (profil hote — Settings) -->
       <div id="import-step-grid" class="hidden">
         <div id="import-grid-header" style="margin-bottom:14px;font-size:.9rem;color:var(--clr-text-muted);"></div>
         <div id="profile-listing-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;max-height:380px;overflow-y:auto;padding-right:4px;"></div>
         <div style="display:flex;justify-content:flex-start;margin-top:16px;">
           <button type="button" class="btn btn-ghost btn-sm" onclick="resetImportModal()">&larr; Retour</button>
-        </div>
-      </div>
-
-      <!-- Etape 2b : Apercu logement unique -->
-<!-- Step 2: Preview -->
-      <div id="import-step-preview" class="hidden">
-        <div id="import-preview-card" class="import-preview-card"></div>
-        <div id="import-warning" class="alert alert-warning hidden" style="margin-top:12px;"></div>
-        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="resetImportModal()" style="margin-right:auto;">← Retour</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="openFormWithImport()" title="Vérifier et modifier les informations avant de sauvegarder">Modifier d&rsquo;abord</button>
-          <button type="button" class="btn btn-primary" id="confirm-import-btn" onclick="confirmImport()">
-            ✓ Importer maintenant
-          </button>
         </div>
       </div>
     </div>
@@ -455,6 +441,23 @@
     </div>
     <div class="modal-body">
       <form id="new-property-form" novalidate>
+
+        <!-- ── Bannière import Airbnb (cachée par défaut) ── -->
+        <div id="import-airbnb-banner" class="hidden" style="background:linear-gradient(135deg,#fff7ed,#fef3c7);border:1px solid #f59e0b;border-radius:var(--radius-md);padding:12px 16px;margin-bottom:18px;display:flex;align-items:flex-start;gap:10px;">
+          <span style="font-size:1.1rem;">✅</span>
+          <div style="flex:1;">
+            <strong style="color:#92400e;">Données importées depuis Airbnb</strong>
+            <span style="color:#78350f;font-size:.82rem;display:block;margin-top:2px;">Vérifiez et complétez les informations ci-dessous avant d'enregistrer.</span>
+            <span id="import-banner-source" style="color:#92400e;font-size:.75rem;font-family:monospace;"></span>
+          </div>
+          <button type="button" onclick="clearImportedData()" style="background:none;border:none;color:#92400e;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 2px;" title="Effacer les données importées">✕</button>
+        </div>
+
+        <!-- Champs cachés source/url/external_id -->
+        <input type="hidden" id="form-source" value="">
+        <input type="hidden" id="form-source-url" value="">
+        <input type="hidden" id="form-external-id" value="">
+
         <!-- Base -->
         <div class="form-section">
           <div class="form-section-title"><i data-lucide="clipboard-list"></i> Informations de base</div>
@@ -490,6 +493,16 @@
             <div class="form-group">
               <label for="max-guests">Voyageurs max *</label>
               <input type="number" id="max-guests" required min="1" placeholder="1">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="property-city">Ville</label>
+              <input type="text" id="property-city" placeholder="Ex: Paris, Nice">
+            </div>
+            <div class="form-group">
+              <label for="property-country">Pays</label>
+              <input type="text" id="property-country" placeholder="Ex: France">
             </div>
           </div>
         </div>
@@ -1224,6 +1237,14 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
           </div>
         </div>
 
+        <!-- <i data-lucide="image"></i> Photos du logement -->
+        <div class="form-section" id="form-photos-section">
+          <div class="form-section-title"><i data-lucide="image"></i> Photos du logement</div>
+          <div id="property-photos-gallery">
+            <p style="font-size:.83rem;color:var(--clr-text-muted);margin:0;">Aucune photo. Importez depuis Airbnb pour récupérer les photos automatiquement.</p>
+          </div>
+        </div>
+
         <!-- <i data-lucide="file-text"></i> Description & Adresse -->
         <div class="form-section">
           <div class="form-section-title"><i data-lucide="file-text"></i> Description & Adresse</div>
@@ -1945,6 +1966,18 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     editingPropertyId = null;
     document.getElementById('modal-prop-title').textContent = 'Ajouter une propriété';
     document.getElementById('save-property-btn').textContent = 'Enregistrer le logement';
+    // Reset import data
+    importedData = null;
+    importedPhotos = [];
+    const banner = document.getElementById('import-airbnb-banner');
+    if (banner) banner.classList.add('hidden');
+    const fsrc = document.getElementById('form-source');
+    const fsrcUrl = document.getElementById('form-source-url');
+    const fext = document.getElementById('form-external-id');
+    if (fsrc) fsrc.value = '';
+    if (fsrcUrl) fsrcUrl.value = '';
+    if (fext) fext.value = '';
+    renderFormPhotoGallery();
   }
 
   document.getElementById('new-property-form').addEventListener('submit', async (e) => {
@@ -2149,18 +2182,31 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
         cohost_phone: document.getElementById('cohost-phone').value,
         // FAQ
         custom_faq: document.getElementById('custom-faq').value,
-        // Description
+        // Description & adresse
         address: document.getElementById('address').value,
+        city: document.getElementById('property-city').value || null,
+        country: document.getElementById('property-country').value || null,
         description: document.getElementById('description').value,
         house_rules: document.getElementById('house-rules').value,
         auto_reply_enabled: document.getElementById('auto-reply-enabled').checked,
-        reply_tone: document.getElementById('reply-tone').value
+        reply_tone: document.getElementById('reply-tone').value,
+        // Import Airbnb
+        source: document.getElementById('form-source').value || null,
+        source_url: document.getElementById('form-source-url').value || null,
+        airbnb_listing_id: document.getElementById('form-external-id').value || null,
+        photos: importedPhotos.length > 0 ? importedPhotos.map((p, i) => ({ ...p, position: i })) : null,
       }});
       closePropertyModal();
       toast('success', wasEditing ? 'Modifications enregistrées !' : 'Logement enregistré !');
       await loadProperties();
     } catch(e) {
-      errDiv.textContent = e.message;
+      if (e.status === 409 && e.data && e.data.alreadyExists) {
+        errDiv.innerHTML = `⚠️ Ce logement Airbnb existe déjà sur votre compte.
+          <button type="button" class="btn btn-sm btn-outline" style="margin-left:8px;"
+            onclick="updateExistingProperty(${e.data.existingId})">Mettre à jour depuis Airbnb</button>`;
+      } else {
+        errDiv.textContent = e.message;
+      }
       errDiv.classList.remove('hidden');
     } finally {
       btn.disabled = false; btn.textContent = wasEditing ? 'Enregistrer les modifications' : 'Enregistrer le logement';
@@ -2197,7 +2243,7 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
 
   // ---- Airbnb Import ----
   let importedData = null;
-  let importedPhotos = [];  // photos renvoyées par /import-airbnb
+  let importedPhotos = [];  // photos récupérées depuis Airbnb
 
   document.getElementById('import-airbnb-btn').addEventListener('click', () => {
     document.getElementById('import-airbnb-modal').classList.remove('hidden');
@@ -2214,19 +2260,18 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
   function closeImportModal() {
     document.getElementById('import-airbnb-modal').classList.add('hidden');
     resetImportModal();
-    importedData = null;
-    importedPhotos = [];
   }
+
   function resetImportModal() {
     document.getElementById('import-step-url').classList.remove('hidden');
-    document.getElementById('import-step-preview').classList.add('hidden');
     document.getElementById('import-step-grid').classList.add('hidden');
     document.getElementById('import-error').classList.add('hidden');
     document.getElementById('import-fetch-btn').disabled = false;
-    document.getElementById('import-fetch-label').textContent = 'Continuer →';
+    document.getElementById('import-fetch-label').textContent = 'Analyser et remplir le formulaire →';
+    document.getElementById('airbnb-url-input').value = '';
   }
 
-  // Detect if URL is a host profile or a single listing
+  // Detect profile vs single listing URL
   function isProfileUrl(url) {
     return /\/users?\/show\//i.test(url) || /\/host-home/i.test(url);
   }
@@ -2243,54 +2288,70 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     const btn = document.getElementById('import-fetch-btn');
     const label = document.getElementById('import-fetch-label');
     btn.disabled = true;
-    label.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Recherche en cours…';
+    label.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Analyse en cours…';
 
     try {
       if (isProfileUrl(url)) {
-        // === Mode profil : lister tous les logements ===
+        // Profile URL → show listing grid
         const result = await apiRequest('/api/properties/scan-airbnb-profile', { method: 'POST', body: { profileUrl: url } });
         renderListingGrid(result.listings);
         document.getElementById('import-step-url').classList.add('hidden');
         document.getElementById('import-step-grid').classList.remove('hidden');
         document.getElementById('import-grid-header').innerHTML =
           '<strong>' + result.total + ' logement' + (result.total > 1 ? 's' : '') + ' trouvé' + (result.total > 1 ? 's' : '') + '</strong>' +
-          ' — cliquez sur Importer pour ajouter un logement à votre site.';
+          ' — cliquez sur « Importer » pour pré-remplir le formulaire.';
       } else {
-        // === Mode logement unique ===
+        // Single listing → fetch data then DIRECTLY open the property form pre-filled
         const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url } });
-        importedData = result.data;
-        importedPhotos = result.photos || [];
-        renderImportPreview(result.data, result.warning, importedPhotos);
-        document.getElementById('import-step-url').classList.add('hidden');
-        document.getElementById('import-step-preview').classList.remove('hidden');
+
         if (result.warning) {
-          const w = document.getElementById('import-warning');
-          w.textContent = result.warning;
-          w.classList.remove('hidden');
+          const errDiv = document.getElementById('import-error');
+          errDiv.textContent = '⚠️ ' + result.warning;
+          errDiv.classList.remove('hidden');
+          errDiv.className = 'alert alert-warning';
         }
+
+        // Open form pre-filled — this is the main action
+        openFormWithImport(result.data, result.photos || []);
       }
-    } catch(err) {
+    } catch (err) {
       const errDiv = document.getElementById('import-error');
       errDiv.textContent = err.message || 'Erreur lors de la recherche.';
       errDiv.classList.remove('hidden');
+      errDiv.className = 'alert alert-error';
       btn.disabled = false;
-      label.textContent = 'Continuer →';
+      label.textContent = 'Analyser et remplir le formulaire →';
     }
   }
 
-  // Render the listing grid for profile scan results
+  // Profile scan grid (used from Settings too)
   function renderListingGrid(listings) {
     document.getElementById('profile-listing-grid').innerHTML = listings.map(l => {
       const name = l.name || ('Logement #' + l.id);
       return `<div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:14px 12px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;">
         <div style="font-size:.82rem;font-weight:600;color:var(--clr-text);line-height:1.3;">${escapeHtml(name)}</div>
         <div style="font-size:.72rem;color:var(--clr-text-muted);">#${l.id}</div>
-        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:auto;" onclick="importSingleListing('${l.id}', this)">Importer</button>
+        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:auto;" onclick="importSingleFromGrid('${l.id}', this)">Remplir le formulaire</button>
       </div>`;
     }).join('');
   }
 
-  // Import a single listing from the grid (direct create, no preview)
+  // From Settings profile grid: fetch and open the form pre-filled
+  async function importSingleFromGrid(listingId, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;vertical-align:middle;"></span>';
+    try {
+      const result = await apiRequest('/api/properties/import-airbnb', { method: 'POST', body: { url: listingId } });
+      openFormWithImport(result.data, result.photos || []);
+      btn.textContent = '✓ Formulaire ouvert';
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Réessayer';
+      toast('error', err.message || "Erreur lors de l'importation.");
+    }
+  }
+
+  // importSingleListing: direct save (used from Settings profile grid — batch import shortcut)
   async function importSingleListing(listingId, btn) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;vertical-align:middle;"></span>';
@@ -2299,170 +2360,196 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
       const d = result.data;
       const photos = result.photos || [];
       const payload = _buildImportPayload(d, photos);
-      const importResult = await apiRequest('/api/properties/confirm-import', { method: 'POST', body: payload });
-      if (importResult.alreadyExists) {
-        btn.disabled = false;
-        btn.textContent = 'Déjà importé';
-        toast('info', 'Ce logement est déjà sur votre compte.');
-        return;
-      }
+      const importResult = await apiRequest('/api/properties', { method: 'POST', body: payload });
       btn.textContent = '✓ Importé';
       btn.style.background = 'var(--clr-accent)';
       btn.style.borderColor = 'var(--clr-accent)';
       await loadProperties();
       toast('success', '' + d.name + ' importé !');
-    } catch(err) {
-      btn.disabled = false;
-      btn.textContent = 'Réessayer';
-      toast('error', err.message || "Erreur lors de l'importation.");
+    } catch (err) {
+      if (err.status === 409 && err.data && err.data.alreadyExists) {
+        btn.disabled = false;
+        btn.textContent = 'Déjà importé';
+        toast('info', 'Ce logement est déjà sur votre compte.');
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Réessayer';
+        toast('error', err.message || "Erreur lors de l'importation.");
+      }
     }
   }
 
-  function renderImportPreview(d, warning, photos) {
-    photos = photos || [];
-    const yesNo = val => val ? '<span style="color:var(--clr-accent)">✓</span>' : '<span style="color:var(--clr-text-light)">–</span>';
-    const confidence = { high: 'Données complètes', medium: 'Données partielles', low: 'Données partielles', none: 'À compléter manuellement' };
-    const confBadge = confidence[d._confidence || 'none'];
-    const typeLabels = { apartment:'Appartement', house:'Maison', villa:'Villa', studio:'Studio', loft:'Loft', chalet:'Chalet' };
-    const truncate = (str, n) => str && str.length > n ? str.slice(0, n) + '…' : str || '';
+  // ── CORE: open property form pre-filled with Airbnb data ──────────────────
+  function openFormWithImport(d, photos) {
+    // Store globally for the form submit
+    importedData = d;
+    importedPhotos = (photos || []).map((p, i) => ({ ...p, position: i }));
 
-    // Photos HTML
-    let photosHtml = '';
-    if (photos.length > 0) {
-      const grid = photos.slice(0, 12).map((p, i) => `
-        <div id="preview-photo-${i}" style="position:relative;border-radius:8px;overflow:hidden;border:2px solid ${p.is_main ? 'var(--clr-primary)' : 'var(--clr-border)'};aspect-ratio:4/3;background:#111;">
-          <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.alt || '')}" loading="lazy"
-            style="width:100%;height:100%;object-fit:cover;display:block;"
-            onerror="this.parentElement.style.display='none'">
-          ${p.is_main ? '<div style="position:absolute;top:4px;left:4px;background:var(--clr-primary);color:#fff;font-size:.65rem;padding:2px 6px;border-radius:4px;font-weight:600;">Principale</div>' : ''}
-          <div style="position:absolute;top:4px;right:4px;display:flex;gap:4px;">
-            ${!p.is_main ? `<button onclick="setPreviewMainPhoto(${i})" title="Définir comme principale"
-              style="background:rgba(0,0,0,.55);border:none;border-radius:4px;color:#fff;font-size:.75rem;padding:2px 6px;cursor:pointer;backdrop-filter:blur(4px);">⭐</button>` : ''}
-            <button onclick="removePreviewPhoto(${i})" title="Retirer cette photo"
-              style="background:rgba(0,0,0,.55);border:none;border-radius:4px;color:#fff;font-size:.75rem;padding:2px 6px;cursor:pointer;backdrop-filter:blur(4px);">✕</button>
-          </div>
-        </div>`).join('');
-      photosHtml = `
-        <div style="margin-top:14px;border-top:1px solid var(--clr-border);padding-top:12px;">
-          <div style="font-size:.82rem;font-weight:600;color:var(--clr-text);margin-bottom:8px;">📷 Photos (${photos.length})
-            <span style="font-weight:400;color:var(--clr-text-muted);font-size:.75rem;"> — cliquez ⭐ pour choisir la photo principale, ✕ pour retirer</span>
-          </div>
-          <div id="import-photos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;">${grid}</div>
-        </div>`;
+    // Close import modal
+    closeImportModal();
+
+    // Reset the form first (so no stale data from previous edits)
+    if (!editingPropertyId) {
+      document.getElementById('new-property-form').reset();
     }
 
-    document.getElementById('import-preview-card').innerHTML = `
-      <div class="import-preview-header">
-        <div>
-          <div class="import-preview-title">${escapeHtml(d.name)}</div>
-          <div class="import-preview-meta">
-            <span style="font-size:.78rem;color:var(--clr-text-muted);">${typeLabels[d.property_type]||d.property_type}</span>
-            · <span style="font-size:.78rem;color:var(--clr-text-muted);">ID ${d.airbnb_listing_id}</span>
-            · <span style="font-size:.78rem;">${confBadge}</span>
-          </div>
-        </div>
-      </div>
-      <div class="import-preview-stats">
-        <div class="import-stat"><span class="import-stat-val">${d.bedrooms}</span><span class="import-stat-lbl">Chambres</span></div>
-        <div class="import-stat"><span class="import-stat-val">${d.beds}</span><span class="import-stat-lbl">Lits</span></div>
-        <div class="import-stat"><span class="import-stat-val">${d.bathrooms}</span><span class="import-stat-lbl">SDB</span></div>
-        <div class="import-stat"><span class="import-stat-val">${d.max_guests}</span><span class="import-stat-lbl">Voyageurs</span></div>
-      </div>
-      <div class="import-preview-amenities">
-        <span>Wi-Fi ${yesNo(d.has_wifi)}</span>
-        <span>Cuisine ${yesNo(d.has_kitchen)}</span>
-        <span>Parking ${yesNo(d.has_parking)}</span>
-        <span>Piscine ${yesNo(d.has_pool)}</span>
-        <span>Clim ${yesNo(d.has_air_conditioning)}</span>
-        <span>Chauffage ${yesNo(d.has_heating)}</span>
-        <span>TV ${yesNo(d.has_tv)}</span>
-        <span>Netflix ${yesNo(d.has_netflix)}</span>
-        <span>Cheminée ${yesNo(d.has_fireplace)}</span>
-        <span>Baignoire ${yesNo(d.has_bathtub)}</span>
-        <span>Sèche-chev. ${yesNo(d.has_hair_dryer)}</span>
-        <span>Lave-linge ${yesNo(d.has_washing_machine)}</span>
-        <span>Sèche-linge ${yesNo(d.has_dryer)}</span>
-        <span>Lave-vaisselle ${yesNo(d.has_dishwasher)}</span>
-        <span>Réfrigérateur ${yesNo(d.has_refrigerator)}</span>
-        <span>Machine café ${yesNo(d.has_coffee_maker)}</span>
-        <span>Barbecue ${yesNo(d.has_bbq)}</span>
-        <span>Terrasse ${yesNo(d.has_terrace)}</span>
-        <span>Jardin ${yesNo(d.has_garden)}</span>
-        <span>Salle sport ${yesNo(d.has_gym)}</span>
-        <span>Dét. fumée ${yesNo(d.has_smoke_detector)}</span>
-        <span>Dét. CO ${yesNo(d.has_carbon_monoxide_detector)}</span>
-        <span>Extincteur ${yesNo(d.has_fire_extinguisher)}</span>
-        <span>Trousse ${yesNo(d.has_first_aid_kit)}</span>
-        <span>Animaux ${yesNo(d.allows_pets)}</span>
-        <span>Fumeurs ${yesNo(d.allows_smoking)}</span>
-      </div>
-      ${d.address ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:10px;">${escapeHtml(d.address)}</div>` : ''}
-      ${d.description ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;border-top:1px solid var(--clr-border);padding-top:8px;"><strong style="color:var(--clr-text);">Description :</strong> ${escapeHtml(truncate(d.description, 200))}</div>` : ''}
-      ${d.house_rules ? `<div style="font-size:.82rem;color:var(--clr-text-muted);margin-top:8px;"><strong style="color:var(--clr-text);">Règles :</strong> ${escapeHtml(truncate(d.house_rules, 180))}</div>` : ''}
-      ${photosHtml}
-    `;
-  }
+    // Pre-fill all text/select/checkbox fields
+    _prefillPropertyForm(d);
 
-  // Remove a photo from the preview (only modifies importedPhotos)
-  function removePreviewPhoto(idx) {
-    importedPhotos.splice(idx, 1);
-    // Re-index is_main
-    if (importedPhotos.length > 0 && !importedPhotos.some(p => p.is_main)) {
-      importedPhotos[0].is_main = true;
+    // Show banner
+    const banner = document.getElementById('import-airbnb-banner');
+    banner.classList.remove('hidden');
+    const bannerSrc = document.getElementById('import-banner-source');
+    if (d.airbnb_listing_id) {
+      bannerSrc.textContent = 'Annonce Airbnb #' + d.airbnb_listing_id + (d._confidence ? ' · ' + { high: 'données complètes', medium: 'données partielles', low: 'données partielles', none: 'à compléter' }[d._confidence] : '');
     }
-    renderImportPreview(importedData, null, importedPhotos);
-  }
 
-  // Set a photo as the main photo in the preview
-  function setPreviewMainPhoto(idx) {
-    importedPhotos.forEach((p, i) => { p.is_main = (i === idx); });
-    renderImportPreview(importedData, null, importedPhotos);
+    // Render photo gallery in the form
+    renderFormPhotoGallery();
+
+    // Open form modal, scroll to top
+    const modal = document.getElementById('new-property-modal');
+    modal.classList.remove('hidden');
+    const body = modal.querySelector('.modal-body');
+    if (body) body.scrollTop = 0;
+    document.getElementById('property-name').focus();
   }
 
   function _prefillPropertyForm(d) {
-    const sf = (id, val) => { const el = document.getElementById(id); if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) el.value = val !== undefined && val !== null ? val : el.value; };
+    const sf = (id, val) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        if (val !== undefined && val !== null && val !== '') el.value = val;
+      }
+    };
     const sc = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+
+    // Base
     sf('property-name', d.name);
     sf('property-type', d.property_type);
     sf('bedrooms', d.bedrooms);
     sf('beds', d.beds);
     sf('bathrooms', d.bathrooms);
     sf('max-guests', d.max_guests);
+    sf('property-city', d.city);
+    sf('property-country', d.country);
+
+    // Hidden import fields
+    sf('form-source', 'airbnb');
+    sf('form-source-url', d.source_url || '');
+    sf('form-external-id', d.airbnb_listing_id || '');
+
+    // Description & address
     sf('address', d.address);
     sf('description', d.description);
     sf('house-rules', d.house_rules);
-    // Infos pratiques importées depuis Airbnb
+
+    // Arrivée
     sf('check-in-time',  d.check_in_time);
     sf('check-out-time', d.check_out_time);
     sf('nearby',         d.nearby);
-    sc('has-wifi', d.has_wifi); sc('has-kitchen', d.has_kitchen);
-    sc('has-parking', d.has_parking); sc('has-pool', d.has_pool);
-    sc('has-gym', d.has_gym); sc('has-tv', d.has_tv);
-    sc('has-washing-machine', d.has_washing_machine); sc('has-air-conditioning', d.has_air_conditioning);
-    sc('has-heating', d.has_heating); sc('has-workspace', d.has_workspace);
-    sc('has-hair-dryer', d.has_hair_dryer); sc('has-iron', d.has_iron);
-    sc('has-bathtub', d.has_bathtub); sc('has-dryer', d.has_dryer);
-    sc('has-dishwasher', d.has_dishwasher); sc('has-microwave', d.has_microwave);
-    sc('has-refrigerator', d.has_refrigerator); sc('has-coffee-maker', d.has_coffee_maker);
-    sc('has-smoke-detector', d.has_smoke_detector); sc('has-carbon-monoxide-detector', d.has_carbon_monoxide_detector);
-    sc('has-fire-extinguisher', d.has_fire_extinguisher); sc('has-first-aid-kit', d.has_first_aid_kit);
-    sc('has-bbq', d.has_bbq); sc('has-terrace', d.has_terrace); sc('has-garden', d.has_garden);
-    sc('has-netflix', d.has_netflix); sc('has-fireplace', d.has_fireplace);
-    sc('allows-pets', d.allows_pets); sc('allows-smoking', d.allows_smoking);
+
+    // Équipements — checkboxes
+    sc('has-wifi', d.has_wifi);
+    sc('has-kitchen', d.has_kitchen);
+    sc('has-parking', d.has_parking);
+    sc('has-pool', d.has_pool);
+    sc('has-gym', d.has_gym);
+    sc('has-tv', d.has_tv);
+    sc('has-washing-machine', d.has_washing_machine);
+    sc('has-air-conditioning', d.has_air_conditioning);
+    sc('has-heating', d.has_heating);
+    sc('has-workspace', d.has_workspace);
+    sc('has-hair-dryer', d.has_hair_dryer);
+    sc('has-iron', d.has_iron);
+    sc('has-bathtub', d.has_bathtub);
+    sc('has-dryer', d.has_dryer);
+    sc('has-dishwasher', d.has_dishwasher);
+    sc('has-microwave', d.has_microwave);
+    sc('has-refrigerator', d.has_refrigerator);
+    sc('has-coffee-maker', d.has_coffee_maker);
+    sc('has-smoke-detector', d.has_smoke_detector);
+    sc('has-carbon-monoxide-detector', d.has_carbon_monoxide_detector);
+    sc('has-fire-extinguisher', d.has_fire_extinguisher);
+    sc('has-first-aid-kit', d.has_first_aid_kit);
+    sc('has-bbq', d.has_bbq);
+    sc('has-terrace', d.has_terrace);
+    sc('has-garden', d.has_garden);
+    sc('has-netflix', d.has_netflix);
+    sc('has-fireplace', d.has_fireplace);
+    sc('allows-pets', d.allows_pets);
+    sc('allows-smoking', d.allows_smoking);
     sc('allows-events', d.allows_events);
   }
 
-  // Build the confirm-import payload from importedData + importedPhotos
+  // Render photos inside the property form gallery
+  function renderFormPhotoGallery() {
+    const gallery = document.getElementById('property-photos-gallery');
+    if (!gallery) return;
+
+    if (importedPhotos.length === 0) {
+      gallery.innerHTML = '<p style="font-size:.83rem;color:var(--clr-text-muted);margin:0;">Aucune photo. Importez depuis Airbnb pour récupérer les photos automatiquement.</p>';
+      return;
+    }
+
+    const grid = importedPhotos.map((p, i) => `
+      <div style="position:relative;border-radius:8px;overflow:hidden;border:2px solid ${p.is_main ? 'var(--clr-primary)' : 'var(--clr-border)'};aspect-ratio:4/3;background:#111;">
+        <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.alt || '')}" loading="lazy"
+          style="width:100%;height:100%;object-fit:cover;display:block;"
+          onerror="this.parentElement.style.display='none'">
+        ${p.is_main ? '<div style="position:absolute;top:4px;left:4px;background:var(--clr-primary);color:#fff;font-size:.6rem;padding:2px 6px;border-radius:4px;font-weight:700;">PRINCIPALE</div>' : ''}
+        <div style="position:absolute;top:4px;right:4px;display:flex;gap:3px;">
+          ${!p.is_main ? `<button type="button" onclick="setFormMainPhoto(${i})" title="Définir comme principale"
+            style="background:rgba(0,0,0,.6);border:none;border-radius:4px;color:#fff;font-size:.7rem;padding:2px 5px;cursor:pointer;">⭐</button>` : ''}
+          <button type="button" onclick="removeFormPhoto(${i})" title="Retirer cette photo"
+            style="background:rgba(0,0,0,.6);border:none;border-radius:4px;color:#fff;font-size:.7rem;padding:2px 5px;cursor:pointer;">✕</button>
+        </div>
+      </div>`).join('');
+
+    gallery.innerHTML = `
+      <div style="font-size:.8rem;color:var(--clr-text-muted);margin-bottom:8px;">
+        ${importedPhotos.length} photo${importedPhotos.length > 1 ? 's' : ''} importée${importedPhotos.length > 1 ? 's' : ''} —
+        <span style="color:var(--clr-text-muted);">⭐ photo principale · ✕ supprimer</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${grid}</div>`;
+  }
+
+  function removeFormPhoto(idx) {
+    importedPhotos.splice(idx, 1);
+    if (importedPhotos.length > 0 && !importedPhotos.some(p => p.is_main)) {
+      importedPhotos[0].is_main = true;
+    }
+    importedPhotos.forEach((p, i) => { p.position = i; });
+    renderFormPhotoGallery();
+  }
+
+  function setFormMainPhoto(idx) {
+    importedPhotos.forEach((p, i) => { p.is_main = (i === idx); });
+    renderFormPhotoGallery();
+  }
+
+  function clearImportedData() {
+    importedData = null;
+    importedPhotos = [];
+    document.getElementById('form-source').value = '';
+    document.getElementById('form-source-url').value = '';
+    document.getElementById('form-external-id').value = '';
+    document.getElementById('import-airbnb-banner').classList.add('hidden');
+    renderFormPhotoGallery();
+  }
+
+  // Build full payload for direct save (profile grid / Settings batch import)
   function _buildImportPayload(d, photos) {
     return {
-      airbnb_listing_id: d.airbnb_listing_id,
       name: d.name, property_type: d.property_type,
       bedrooms: d.bedrooms, beds: d.beds, bathrooms: d.bathrooms, max_guests: d.max_guests,
       address: d.address || '', description: d.description || '',
       house_rules: d.house_rules || '', check_in_time: d.check_in_time || '',
       check_out_time: d.check_out_time || '', nearby: d.nearby || '',
-      source_url: d.source_url || '', city: d.city || '', country: d.country || '',
-      rating: d.rating || null, review_count: d.review_count || 0,
+      city: d.city || '', country: d.country || '',
+      source: 'airbnb', source_url: d.source_url || '',
+      airbnb_listing_id: d.airbnb_listing_id || null,
       photos: (photos || []).map((p, i) => ({ ...p, position: i })),
       has_wifi: d.has_wifi, has_kitchen: d.has_kitchen, has_parking: d.has_parking,
       has_pool: d.has_pool, has_gym: d.has_gym, has_tv: d.has_tv,
@@ -2482,59 +2569,16 @@ R: Pizza Roma à 100m, excellent rapport qualité-prix."></textarea>
     };
   }
 
-  // Direct import — creates the property immediately, no second form needed
-  async function confirmImport() {
-    if (!importedData) return;
-    const btn = document.getElementById('confirm-import-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span> Importation...';
-
-    try {
-      const payload = _buildImportPayload(importedData, importedPhotos);
-      const result = await apiRequest('/api/properties/confirm-import', { method: 'POST', body: payload });
-
-      if (result.alreadyExists) {
-        // Propose update
-        btn.disabled = false;
-        btn.textContent = '✓ Importer maintenant';
-        const w = document.getElementById('import-warning');
-        w.innerHTML = `⚠️ Ce logement existe déjà sur votre compte.
-          <button class="btn btn-sm btn-outline" style="margin-left:8px;"
-            onclick="updateExistingProperty(${result.existingId})">Mettre à jour</button>`;
-        w.classList.remove('hidden');
-        return;
-      }
-
-      closeImportModal();
-      toast('success', 'Logement importé avec succès !');
-      await loadProperties();
-    } catch (err) {
-      toast('error', err.message || 'Erreur lors de l\'importation.');
-      btn.disabled = false;
-      btn.textContent = '✓ Importer maintenant';
-    }
-  }
-
-  // Update an already-imported property with fresh Airbnb data
+  // Update an already-imported property with fresh Airbnb data (called from property form 409 message)
   async function updateExistingProperty(propertyId) {
     try {
       await apiRequest('/api/properties/' + propertyId + '/update-from-airbnb', { method: 'PUT' });
-      closeImportModal();
+      closePropertyModal();
       toast('success', 'Logement mis à jour depuis Airbnb !');
       await loadProperties();
     } catch (err) {
       toast('error', err.message || 'Erreur lors de la mise à jour.');
     }
-  }
-
-  // Opens the property form pre-filled — for users who want to review first
-  function openFormWithImport() {
-    if (!importedData) return;
-    _prefillPropertyForm(importedData);
-    closeImportModal();
-    document.getElementById('new-property-modal').classList.remove('hidden');
-    document.getElementById('property-name').focus();
-    toast('success', 'Formulaire pré-rempli ! Vérifiez et complétez les informations.');
   }
 
   // ---- Toast helper ----
