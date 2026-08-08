@@ -551,6 +551,7 @@ async function getProperties(req, res) {
              has_bbq, has_terrace, has_garden, has_netflix, has_fireplace,
              allows_pets, allows_smoking, allows_events,
              address, description, house_rules, auto_reply_enabled, reply_tone,
+             city, country, main_photo_url, source, airbnb_listing_id,
              created_at, updated_at
       FROM property_profiles
       WHERE user_id = ?
@@ -584,7 +585,9 @@ async function getPropertyById(req, res) {
              has_smoke_detector, has_carbon_monoxide_detector, has_fire_extinguisher, has_first_aid_kit,
              has_bbq, has_terrace, has_garden, has_netflix, has_fireplace,
              allows_pets, allows_smoking, allows_events,
-             address, description, house_rules, context_json, created_at, updated_at
+             address, description, house_rules, context_json,
+             city, country, main_photo_url, source, source_url, airbnb_listing_id, auto_reply_enabled, reply_tone,
+             created_at, updated_at
       FROM property_profiles
       WHERE id = ? AND user_id = ?
     `;
@@ -639,7 +642,7 @@ async function updateProperty(req, res) {
       'has_bbq', 'has_terrace', 'has_garden', 'has_netflix', 'has_fireplace',
       'allows_pets', 'allows_smoking', 'allows_events',
       'address', 'description', 'house_rules', 'auto_reply_enabled', 'reply_tone',
-      'superhot_listing_id'
+      'superhot_listing_id', 'city', 'country'
     ];
 
     const updateFields = [];

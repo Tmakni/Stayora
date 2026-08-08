@@ -8,6 +8,8 @@
     "predev": "node prestart.js",
     "start": "node server/server.js",
     "dev": "nodemon server/server.js",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client install && npm --prefix client run build",
     "dev:wsl": "bash -c 'source ~/.nvm/nvm.sh && nvm use 20 --silent && npx nodemon server/server.js'",
     "test": "jest --verbose",
     "test:watch": "jest --watch",

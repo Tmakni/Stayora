@@ -1,0 +1,176 @@
+// Centralised API client — every network call in the app goes through here.
+// All endpoints are the existing, unmodified Express routes (see API.md).
+const TOKEN_KEY = 'token';
+const EMAIL_KEY = 'user_email';
+
+export class ApiError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+export function setSession(token, email) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  if (email) localStorage.setItem(EMAIL_KEY, email);
+}
+export function getStoredEmail() {
+  return localStorage.getItem(EMAIL_KEY);
+}
+export function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EMAIL_KEY);
+}
+
+let refreshPromise = null;
+
+async function tryRefreshToken() {
+  const token = getToken();
+  if (!token) return false;
+  if (!refreshPromise) {
+    refreshPromise = fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ token }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.token) {
+          setSession(data.token);
+          return true;
+        }
+        return false;
+      })
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+async function request(path, { method = 'GET', body, params, _retried } = {}) {
+  const token = getToken();
+  let url = path;
+  if (params && Object.keys(params).length > 0) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    ).toString();
+    if (qs) url += (path.includes('?') ? '&' : '?') + qs;
+  }
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr) {
+    throw new ApiError('Connexion impossible. Vérifiez votre réseau.', 0, null);
+  }
+
+  if (res.status === 401 && token && !_retried && !path.startsWith('/api/auth/')) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) return request(path, { method, body, params, _retried: true });
+    clearSession();
+    const err = new ApiError('Session expirée. Veuillez vous reconnecter.', 401, null);
+    err.sessionExpired = true;
+    throw err;
+  }
+
+  let data = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!res.ok) {
+    throw new ApiError(data?.error || data?.message || `Erreur ${res.status}`, res.status, data);
+  }
+
+  return data ?? {};
+}
+
+export const api = {
+  auth: {
+    login: (email, password) => request('/api/auth/login', { method: 'POST', body: { email, password } }),
+    register: (email, password) => request('/api/auth/register', { method: 'POST', body: { email, password } }),
+    me: () => request('/api/auth/me'),
+    refresh: (token) => request('/api/auth/refresh', { method: 'POST', body: { token } }),
+    changePassword: (payload) => request('/api/auth/password', { method: 'PUT', body: payload }),
+  },
+
+  properties: {
+    list: () => request('/api/properties'),
+    get: (id) => request(`/api/properties/${id}`),
+    create: (payload) => request('/api/properties', { method: 'POST', body: payload }),
+    update: (id, payload) => request(`/api/properties/${id}`, { method: 'PUT', body: payload }),
+    remove: (id) => request(`/api/properties/${id}`, { method: 'DELETE' }),
+    getCalendar: (id, params) => request(`/api/properties/${id}/calendar`, { params }),
+    addCalendarBlock: (id, payload) => request(`/api/properties/${id}/calendar`, { method: 'POST', body: payload }),
+    importAirbnb: (url) => request('/api/properties/import-airbnb', { method: 'POST', body: { url } }),
+    scanAirbnbProfile: (profileUrl) =>
+      request('/api/properties/scan-airbnb-profile', { method: 'POST', body: { profileUrl } }),
+    updateFromAirbnb: (id) => request(`/api/properties/${id}/update-from-airbnb`, { method: 'PUT' }),
+    getPhotos: (id) => request(`/api/properties/${id}/photos`),
+    deletePhoto: (id, photoId) => request(`/api/properties/${id}/photos/${photoId}`, { method: 'DELETE' }),
+    setMainPhoto: (id, photoId) => request(`/api/properties/${id}/photos/${photoId}/main`, { method: 'PUT' }),
+  },
+
+  conversations: {
+    list: () => request('/api/conversations').then((d) => d.conversations || []),
+    get: (id) => request(`/api/conversations/${id}`),
+    create: (payload) => request('/api/conversations', { method: 'POST', body: payload }),
+    update: (id, payload) => request(`/api/conversations/${id}`, { method: 'PUT', body: payload }),
+    addMessage: (id, payload) => request(`/api/conversations/${id}/messages`, { method: 'POST', body: payload }),
+    sendAirbnb: (id, message) => request(`/api/conversations/${id}/send-airbnb`, { method: 'POST', body: { message } }),
+  },
+
+  ai: {
+    generateDraft: (payload) => request('/api/ai/draft', { method: 'POST', body: payload }),
+  },
+
+  calendarApi: {
+    connect: (propertyId, icalUrl) => request('/api/calendar/connect', { method: 'POST', body: { property_id: propertyId, ical_url: icalUrl } }),
+    disconnect: (propertyId) => request(`/api/calendar/${propertyId}`, { method: 'DELETE' }),
+    get: (propertyId, params) => request(`/api/calendar/${propertyId}`, { params }),
+    sync: (propertyId) => request(`/api/calendar/${propertyId}/sync`, { method: 'POST' }),
+    checkAvailability: (propertyId, start, end) => request(`/api/calendar/${propertyId}/availability`, { params: { start, end } }),
+  },
+
+  gmail: {
+    getAuthUrl: () => request('/api/gmail/auth-url'),
+    getAccounts: () => request('/api/gmail/accounts'),
+    removeAccount: (id) => request(`/api/gmail/accounts/${id}`, { method: 'DELETE' }),
+    reauthorize: (accountId) => request(`/api/gmail/reauthorize/${accountId}`),
+    purgeNonAirbnb: () => request('/api/gmail/purge-non-airbnb', { method: 'DELETE' }),
+  },
+
+  sync: {
+    getAirbnbAccounts: () => request('/api/sync/accounts'),
+    addAirbnbAccount: (payload) => request('/api/sync/accounts', { method: 'POST', body: payload }),
+    removeAirbnbAccount: (id) => request(`/api/sync/accounts/${id}`, { method: 'DELETE' }),
+    syncMessages: (accountId) => request(`/api/sync/messages/${accountId}`, { method: 'POST' }),
+    syncReservations: (accountId) => request(`/api/sync/reservations/${accountId}`, { method: 'POST' }),
+    fullSync: (accountId) => request(`/api/sync/full/${accountId}`, { method: 'POST' }),
+    getReservations: (params) => request('/api/sync/reservations', { params }),
+    getReservation: (id) => request(`/api/sync/reservations/${id}`),
+    getLogs: () => request('/api/sync/logs'),
+    eventsUrl: () => `/api/sync/events?token=${encodeURIComponent(getToken() || '')}`,
+  },
+};

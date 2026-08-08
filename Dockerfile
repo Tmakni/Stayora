@@ -7,6 +7,15 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+# ── Client build stage ───────────────────────────────────────────────────────
+FROM node:20-alpine AS client-build
+
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci
+COPY client/ ./
+RUN npm run build
+
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:20-alpine
 
@@ -24,6 +33,10 @@ RUN mkdir -p /home/appuser/.local/share/airbnb-ai-agent /data \
 # Copy dependencies and app code
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Replace the raw client source with the compiled SPA (client/dist)
+RUN rm -rf client/src client/node_modules
+COPY --from=client-build /app/client/dist ./client/dist
 
 # Give appuser ownership of the entire app
 RUN chown -R appuser:appgroup /app

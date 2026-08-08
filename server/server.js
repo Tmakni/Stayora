@@ -36,7 +36,9 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+      // 'unsafe-inline' only covers the tiny theme-flash-prevention <script> in
+      // index.html — the React bundle itself is loaded from a same-origin file.
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https:"],
@@ -45,7 +47,6 @@ app.use(helmet({
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
-      scriptSrcAttr: ["'unsafe-inline'"],
       ...(config.isProd ? { upgradeInsecureRequests: [] } : {}),
     }
   },
@@ -108,8 +109,9 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(cookieParser());
 
-// Serve static files with caching
-app.use(express.static(path.join(__dirname, '../client'), {
+// Serve the built React SPA (client/dist — produced by `npm run build` in client/)
+const CLIENT_DIST = path.join(__dirname, '../client/dist');
+app.use(express.static(CLIENT_DIST, {
   maxAge: config.isProd ? '7d' : 0,
   etag: true,
   lastModified: true,
@@ -155,10 +157,10 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// SPA fallback
+// SPA fallback — React Router handles the actual routing client-side
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
-    res.sendFile(path.join(__dirname, '../client/index.html'));
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
   } else {
     res.status(404).json({ error: 'Not found' });
   }

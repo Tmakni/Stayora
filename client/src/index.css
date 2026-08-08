@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Michel Calm AI — Design tokens
+   Light theme is the default brand identity. Dark theme is a
+   prepared, first-class alternative toggled via the `dark` class.
+   Colors are stored as "R G B" triplets so Tailwind can apply
+   opacity modifiers (e.g. bg-primary/10) via rgb(var(..) / <alpha>).
+   ============================================================ */
+@layer base {
+  :root {
+    --background: 247 248 252;      /* #F7F8FC */
+    --foreground: 17 24 39;         /* #111827 */
+
+    --card: 255 255 255;            /* #FFFFFF */
+    --card-foreground: 17 24 39;
+    --popover: 255 255 255;
+    --popover-foreground: 17 24 39;
+
+    --surface: 255 255 255;
+    --surface-hover: 243 244 248;
+
+    --muted: 243 244 248;
+    --muted-foreground: 107 114 128; /* #6B7280 */
+
+    --border: 231 233 240;          /* #E7E9F0 */
+    --input: 225 227 236;
+
+    --primary: 99 91 255;           /* #635BFF */
+    --primary-hover: 84 75 245;
+    --primary-foreground: 255 255 255;
+
+    --secondary: 37 99 235;         /* #2563EB */
+    --secondary-foreground: 255 255 255;
+
+    --accent: 238 237 255;          /* soft violet tint for subtle Michel highlights */
+    --accent-foreground: 76 68 230;
+
+    --success: 34 197 94;           /* #22C55E */
+    --success-foreground: 255 255 255;
+    --warning: 245 158 11;          /* #F59E0B */
+    --warning-foreground: 255 255 255;
+    --danger: 239 68 68;            /* #EF4444 */
+    --danger-foreground: 255 255 255;
+
+    --ring: 99 91 255;
+
+    --radius: 14px;
+  }
+
+  .dark {
+    --background: 12 13 20;
+    --foreground: 236 238 245;
+
+    --card: 19 20 30;
+    --card-foreground: 236 238 245;
+    --popover: 19 20 30;
+    --popover-foreground: 236 238 245;
+
+    --surface: 19 20 30;
+    --surface-hover: 27 29 42;
+
+    --muted: 27 29 42;
+    --muted-foreground: 148 155 178;
+
+    --border: 39 41 58;
+    --input: 39 41 58;
+
+    --primary: 132 124 255;
+    --primary-hover: 148 141 255;
+    --primary-foreground: 255 255 255;
+
+    --secondary: 96 150 250;
+    --secondary-foreground: 255 255 255;
+
+    --accent: 35 34 58;
+    --accent-foreground: 199 195 255;
+
+    --success: 52 211 153;
+    --success-foreground: 8 20 16;
+    --warning: 251 191 36;
+    --warning-foreground: 33 22 0;
+    --danger: 248 113 113;
+    --danger-foreground: 32 10 10;
+
+    --ring: 132 124 255;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Comfortable, accessible focus ring everywhere */
+  :focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgb(var(--primary) / 0.2);
+  }
+
+  /* Thin, unobtrusive scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--muted-foreground) / 0.25);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer utilities {
+  /* iOS safe-area helpers used by the mobile bottom nav & sticky composer */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .h-safe-bottom {
+    height: env(safe-area-inset-bottom);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Michel brand gradient — reserved for a few important, high-signal elements */
+  .michel-gradient {
+    background-image: linear-gradient(135deg, rgb(var(--primary)), rgb(var(--secondary)));
+  }
+  .michel-gradient-text {
+    background-image: linear-gradient(135deg, rgb(var(--primary)), rgb(var(--secondary)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
