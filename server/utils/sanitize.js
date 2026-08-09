@@ -47,8 +47,11 @@ function sanitizeEmail(email) {
 
   const cleaned = email.toLowerCase().trim();
 
+  // Distinct from the format error below: an over-long address is a size
+  // problem, not a syntax one, and callers (and their logs) benefit from
+  // telling the two apart.
   if (cleaned.length > 255) {
-    throw new Error('Invalid email format');
+    throw new Error('Email too long');
   }
 
   // RFC 5322 simplified — reject obvious garbage
@@ -76,11 +79,42 @@ function sanitizeJSON(input) {
 }
 
 /**
+ * Remove <script> (and <style>) elements INCLUDING their contents.
+ *
+ * This is deliberately different from stripHtmlTags(): removing only the tags
+ * of `<script>alert("XSS")</script>` leaves the bare payload `alert("XSS")`
+ * behind as text, which is exactly the kind of residue that becomes live code
+ * again the moment it is re-inserted into a template. Here the whole element is
+ * dropped.
+ *
+ * Unterminated forms (`<script>...` with no closing tag, as produced by a
+ * truncated payload) are dropped through end-of-input rather than left intact.
+ */
+function removeScriptTags(input) {
+  if (typeof input !== 'string') return input;
+
+  return input
+    // Paired elements, tolerating attributes and whitespace in the closing tag.
+    .replace(/<script\b[^>]*>[\s\S]*?<\/\s*script\s*>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/\s*style\s*>/gi, '')
+    // Unterminated opener: drop the remainder rather than leaving the payload.
+    .replace(/<script\b[^>]*>[\s\S]*$/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*$/gi, '')
+    // Self-closing / empty forms.
+    .replace(/<\s*script\b[^>]*\/?>/gi, '')
+    .replace(/<\/\s*script\s*>/gi, '');
+}
+
+/**
  * Strip all HTML tags from a string.
+ *
+ * Script and style bodies are removed first — otherwise stripping only the
+ * angle brackets would promote their contents to visible text (see
+ * removeScriptTags above).
  */
 function stripHtmlTags(input) {
   if (typeof input !== 'string') return input;
-  return input.replace(/<[^>]*>/g, '');
+  return removeScriptTags(input).replace(/<[^>]*>/g, '');
 }
 
 /**
@@ -140,6 +174,7 @@ module.exports = {
   sanitizeJSON,
   escapeHtml,
   stripHtmlTags,
+  removeScriptTags,
   validateId,
   validateExternalUrl,
   validateDateString,

@@ -8,11 +8,14 @@ import { MetricCard } from '../../components/shared/MetricCard';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
 import { useProperties, useUpdateProperty } from '../../hooks/useProperties';
+import { useAutoReplySettings } from '../../hooks/useConversations';
+import { AutoReplyModeCard } from './AutoReplyModeCard';
 import { REPLY_TONES } from '../../lib/constants';
 
 export function AutomationsPage() {
   const propertiesQuery = useProperties();
   const updateProperty = useUpdateProperty();
+  const autoReplySettings = useAutoReplySettings();
 
   const properties = propertiesQuery.data || [];
   const activeCount = properties.filter((p) => p.auto_reply_enabled).length;
@@ -38,6 +41,10 @@ export function AutomationsPage() {
   return (
     <PageContainer className="max-w-4xl">
       <PageHeader title="Automatisations" description="Pilotez les réponses automatiques de Michel, logement par logement." />
+
+      <div className="mt-5">
+        <AutoReplyModeCard properties={autoReplySettings.data?.properties || []} />
+      </div>
 
       {propertiesQuery.isLoading ? (
         <div className="mt-5">

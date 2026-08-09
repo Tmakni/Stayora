@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Checkbox } from '../../components/ui/checkbox';
+import { AirbnbLinkField } from '../../components/shared/AirbnbLinkField';
 import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api';
 import { cn } from '../../lib/utils';
@@ -146,7 +147,18 @@ export function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="password">Mot de passe</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Mot de passe</Label>
+                {!isRegister && (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-primary hover:underline"
+                    onClick={() => navigate('/forgot-password')}
+                  >
+                    Mot de passe oublié ?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   id="password"
@@ -198,12 +210,13 @@ export function LoginPage() {
                 </label>
                 {linkAirbnb && (
                   <div className="pt-1">
-                    <Input
-                      placeholder="https://www.airbnb.fr/users/show/123456789"
+                    <AirbnbLinkField
+                      id="register-airbnb-url"
+                      label="Lien de vos annonces"
                       value={airbnbUrl}
-                      onChange={(e) => setAirbnbUrl(e.target.value)}
+                      onChange={setAirbnbUrl}
+                      disabled={submitting}
                     />
-                    <p className="mt-1 text-xs text-muted-foreground">Airbnb → votre photo → « Voir le profil ».</p>
                   </div>
                 )}
               </div>

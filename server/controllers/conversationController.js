@@ -54,33 +54,72 @@ async function getConversations(req, res) {
     const db = getDatabase();
     
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const offset = parseInt(req.query.offset) || 0;
-    
-    // Single query: conversations + message count + last message preview
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+
+    // Page the conversations FIRST, then enrich only that page.
+    //
+    // The previous single-statement version LEFT JOINed two derived tables that
+    // each aggregated the WHOLE messages table — `GROUP BY conversation_id` and
+    // a `ROW_NUMBER() OVER (PARTITION BY conversation_id)` with no user
+    // predicate inside them. Both subqueries were therefore materialised across
+    // every user's messages on every request, and only then narrowed to one
+    // user's 50 rows. Cost grew with total corpus size rather than page size —
+    // the single worst query in the app once conversations accumulate.
+    //
+    // Now: one indexed range scan on (user_id, updated_at) for the page, then
+    // one grouped lookup restricted to that page's ids via idx_msg_conv_created.
     const conversations = await db.query(
       `SELECT c.id, c.title, c.booking_status, c.property_id, c.guest_name,
-              c.created_at, c.updated_at,
-              COALESCE(m_agg.msg_count, 0) AS message_count,
-              SUBSTR(m_last.content, 1, 120) AS last_message
+              c.guest_name_source, c.created_at, c.updated_at
        FROM conversations c
-       LEFT JOIN (
-         SELECT conversation_id, COUNT(*) AS msg_count
-         FROM messages
-         GROUP BY conversation_id
-       ) m_agg ON m_agg.conversation_id = c.id
-       LEFT JOIN (
-         SELECT conversation_id, content,
-                ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY created_at DESC) AS rn
-         FROM messages
-       ) m_last ON m_last.conversation_id = c.id AND m_last.rn = 1
        WHERE c.user_id = ?
        ORDER BY c.updated_at DESC
        LIMIT ? OFFSET ?`,
       [req.userId, limit, offset]
     );
-    
+
+    if (conversations.length === 0) {
+      return res.json({ conversations: [], limit, offset, has_more: false });
+    }
+
+    const ids = conversations.map(c => c.id);
+    const placeholders = ids.map(() => '?').join(',');
+
+    const stats = await db.query(
+      `SELECT m.conversation_id, COUNT(*) AS msg_count
+       FROM messages m
+       WHERE m.conversation_id IN (${placeholders})
+       GROUP BY m.conversation_id`,
+      ids
+    );
+
+    // Newest message per conversation. Same ORDER BY created_at semantics as
+    // before (Gmail messages are stored with the email's own date, so id order
+    // is not chronological), but the window function now runs over this page's
+    // conversations only instead of the entire messages table.
+    const previewRows = await db.query(
+      `SELECT conversation_id, last_message FROM (
+         SELECT conversation_id,
+                SUBSTR(content, 1, 120) AS last_message,
+                ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY created_at DESC, id DESC) AS rn
+         FROM messages
+         WHERE conversation_id IN (${placeholders})
+       ) ranked WHERE rn = 1`,
+      ids
+    );
+
+    const previews = new Map(previewRows.map(r => [r.conversation_id, r.last_message]));
+    const countsById = new Map(stats.map(s => [s.conversation_id, s.msg_count]));
+    for (const conversation of conversations) {
+      conversation.message_count = countsById.get(conversation.id) || 0;
+      conversation.last_message = previews.get(conversation.id) || null;
+    }
+
     return res.json({
-      conversations
+      conversations,
+      limit,
+      offset,
+      has_more: conversations.length === limit,
     });
   } catch (error) {
     logger.error('Get conversations error:', error);

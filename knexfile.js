@@ -29,9 +29,29 @@ const MIGRATIONS = {
 const SQLITE_BASE = {
   client: 'better-sqlite3',
   useNullAsDefault: true,
+  // better-sqlite3 is a synchronous, single-connection driver — a bigger
+  // pool would not add concurrency and can cause "database is locked"
+  // errors. This is correct as-is; do not change it. Real horizontal
+  // scaling for write-heavy load requires the MySQL production path below.
   pool: { min: 1, max: 1 },
   migrations: MIGRATIONS
 };
+
+// MySQL pool size for the production path (USE_MEMORY_DB=false, DB_HOST set).
+// Perf audit for a ~100-concurrent-user target: knex/mysql2 checks out a
+// connection per query (not per request) and holds it only for the query's
+// duration, so pool size tracks *simultaneously in-flight queries*, not
+// concurrent users. max:10 undersizes this: a single dashboard page load
+// alone fires several parallel queries (properties, conversations,
+// reservations, sync logs...) via Promise.all-style controllers, and the
+// webhook handler + 60s sync scheduler add further concurrent load on top
+// of normal API traffic. max:15 gives ~50% more headroom for that kind of
+// burst while staying well under the connection ceilings of typical
+// managed MySQL tiers (Render/PlanetScale/Aiven free-to-mid tiers commonly
+// cap total connections in the 20-60 range) — important since this pool
+// is per Node process and there is currently no multi-instance scale-out.
+// min stays at 2 (cheap to keep warm, no need to raise it).
+const MYSQL_POOL = { min: 2, max: 15 };
 
 /**
  * Construit la configuration MySQL pour la production.
@@ -68,7 +88,7 @@ function buildProductionConfig() {
         connectionString: process.env.DATABASE_URL,
         ssl: sslEnabled ? { rejectUnauthorized: false } : undefined
       },
-      pool: { min: 2, max: 10 },
+      pool: MYSQL_POOL,
       migrations: MIGRATIONS
     };
   }
@@ -85,7 +105,7 @@ function buildProductionConfig() {
       // SSL requis pour la plupart des bases cloud (PlanetScale, Aiven, etc.)
       ssl: sslEnabled ? { rejectUnauthorized: false } : undefined
     },
-    pool: { min: 2, max: 10 },
+    pool: MYSQL_POOL,
     migrations: MIGRATIONS
   };
 }

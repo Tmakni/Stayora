@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Building2, Plus, Download } from 'lucide-react';
+import { Building2, Download } from 'lucide-react';
 import { PageContainer, PageHeader } from '../../components/shared/PageHeader';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { ErrorState } from '../../components/shared/ErrorState';
@@ -41,12 +41,6 @@ export function PropertiesPage() {
     }
     return counts;
   }, [conversationsQuery.data]);
-
-  function openCreateDialog() {
-    setEditingProperty(null);
-    setImportedData(null);
-    setFormOpen(true);
-  }
 
   function openEditDialog(property) {
     setEditingProperty(property);
@@ -94,7 +88,7 @@ export function PropertiesPage() {
           <EmptyState
             icon={Building2}
             title="Aucun logement"
-            description="Importez votre logement depuis Airbnb ou ajoutez-le manuellement."
+            description="Importez vos logements depuis Airbnb pour que Michel puisse répondre à vos voyageurs."
             action={{ label: 'Importer depuis Airbnb', icon: Download, onClick: () => setImportOpen(true) }}
           />
         )}
@@ -111,13 +105,16 @@ export function PropertiesPage() {
                   onDelete={setDeleteTarget}
                 />
               ))}
+              {/* L'ajout manuel a été retiré : un logement créé à la main n'est
+                  relié à aucune annonce, donc ne recevra jamais de message —
+                  seul l'import Airbnb produit un logement exploitable. */}
               <button
                 type="button"
-                onClick={openCreateDialog}
+                onClick={() => setImportOpen(true)}
                 className="flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
               >
-                <Plus className="size-5" />
-                Ajouter manuellement
+                <Download className="size-5" />
+                Importer un logement
               </button>
             </div>
           </>

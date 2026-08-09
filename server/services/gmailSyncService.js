@@ -13,6 +13,13 @@ const { getDatabase } = require('../config/db');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sanitizeEmail, sanitizeString } = require('../utils/sanitize');
 const logger = require('../utils/logger');
+const {
+  FALLBACK_GUEST_NAME,
+  extractGuestNameFromThread,
+  extractRoleBlocks,
+  shouldReplaceStoredName,
+  nameKey,
+} = require('./guestNameExtractor');
 
 // ================================================================
 // OAuth2 helper
@@ -45,7 +52,7 @@ function getGmailClient(accessToken, refreshToken) {
 /**
  * Exchange the one-time auth code for tokens & store in DB
  */
-async function saveGmailAccount(userId, { email, accessToken, refreshToken, expiresAt }) {
+async function saveGmailAccount(userId, { email, accessToken, refreshToken, expiresAt, grantedScopes, canSend }) {
   const db = getDatabase();
 
   const accessTokenEnc = encrypt(accessToken);
@@ -62,17 +69,22 @@ async function saveGmailAccount(userId, { email, accessToken, refreshToken, expi
     await db.query(
       `UPDATE gmail_accounts SET
         access_token_enc = ?, refresh_token_enc = ?, token_expires_at = ?,
+        granted_scopes = ?, can_send = ?,
         is_active = TRUE, sync_status = 'idle', sync_error = NULL, updated_at = NOW()
        WHERE id = ?`,
-      [accessTokenEnc, refreshTokenToStore, expiresAt || null, existing[0].id]
+      [
+        accessTokenEnc, refreshTokenToStore, expiresAt || null,
+        grantedScopes || null, canSend ? 1 : 0,
+        existing[0].id,
+      ]
     );
     return existing[0].id;
   }
 
   const result = await db.query(
-    `INSERT INTO gmail_accounts (user_id, email, access_token_enc, refresh_token_enc, token_expires_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [userId, email, accessTokenEnc, refreshTokenEnc, expiresAt || null]
+    `INSERT INTO gmail_accounts (user_id, email, access_token_enc, refresh_token_enc, token_expires_at, granted_scopes, can_send)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [userId, email, accessTokenEnc, refreshTokenEnc, expiresAt || null, grantedScopes || null, canSend ? 1 : 0]
   );
   return result.insertId;
 }
@@ -139,6 +151,25 @@ async function getGmailAccount(userId, accountId) {
         );
         logger.info(`Gmail token refreshed and saved for account ${accountId}`);
       }
+
+      // Google returns the effective scope set on every refresh. Recording it
+      // here is what lets an account that already carries gmail.send start
+      // sending without a manual reconnect — and, symmetrically, what revokes
+      // sending the moment the grant is narrowed. Before this, granted_scopes
+      // was written only in the OAuth callback, so every account connected
+      // before the send scope existed stayed can_send = 0 forever.
+      if (credentials.scope) {
+        const canSend = hasSendScope(credentials.scope);
+        if (credentials.scope !== account.granted_scopes || !!canSend !== !!account.can_send) {
+          await db.query(
+            'UPDATE gmail_accounts SET granted_scopes = ?, can_send = ? WHERE id = ?',
+            [credentials.scope, canSend ? 1 : 0, account.id]
+          );
+          account.granted_scopes = credentials.scope;
+          account.can_send = canSend ? 1 : 0;
+          logger.info(`Gmail account ${accountId}: scopes recorded, can_send=${canSend}`);
+        }
+      }
     } catch (err) {
       if (err.message === 'GMAIL_INSUFFICIENT_SCOPES') throw err;
 
@@ -171,8 +202,10 @@ async function getGmailAccount(userId, accountId) {
  */
 async function getUserGmailAccounts(userId) {
   const db = getDatabase();
+  // can_send drives the "Réautoriser" prompt: accounts connected before the
+  // gmail.send scope was added hold a token that cannot send.
   return db.query(
-    `SELECT id, email, is_active, last_sync_at, sync_status, sync_error, created_at
+    `SELECT id, email, is_active, last_sync_at, sync_status, sync_error, can_send, created_at
      FROM gmail_accounts WHERE user_id = ? ORDER BY created_at DESC`,
     [userId]
   );
@@ -292,16 +325,26 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
 
     logger.info(`Gmail sync: loaded ${threadMap.size} threads with full message data`);
 
+    // Names Airbnb has labelled "Hôte"/"Co-hôte" for this account, accumulated
+    // across every past sync. Shared by all threads of this run so a guest
+    // writing "Bonjour Delphine," can never make the HOST's name the guest name.
+    const hostNames = loadHostNames(account);
+    const hostNamesBefore = hostNames.size;
+
     let synced = 0;
     let skipped = 0;
     for (const [threadId, msgs] of threadMap) {
       try {
-        const count = await syncGmailThread(userId, accountId, account, gmail, threadId, msgs, properties);
+        const count = await syncGmailThread(userId, accountId, account, gmail, threadId, msgs, properties, hostNames);
         synced += count;
         if (count === 0) skipped++;
       } catch (threadErr) {
         logger.warn(`Gmail sync thread ${threadId} failed: ${threadErr.message}`);
       }
+    }
+
+    if (hostNames.size > hostNamesBefore) {
+      await persistHostNames(db, accountId, hostNames);
     }
 
     logger.info(`Gmail sync: DONE — ${synced} new messages saved, ${skipped} threads skipped (no new messages)`);
@@ -351,8 +394,9 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
  * Sync a single Gmail thread into the conversation system.
  * Handles both Airbnb notification emails and general emails.
  */
-async function syncGmailThread(userId, accountId, account, gmail, threadId, fullMsgs, properties) {
+async function syncGmailThread(userId, accountId, account, gmail, threadId, fullMsgs, properties, hostNames) {
   const db = getDatabase();
+  const knownHostNames = hostNames || new Set();
 
   // Check if we already track this thread
   const existing = await db.query(
@@ -381,12 +425,23 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     return 0;
   }
 
-  // Body already fetched (full format from threads.get) — no extra API call needed
+  // Decode every body ONCE up front. extractBody() walks the MIME tree and
+  // base64-decodes it, and the old flow ran it twice per message (once here for
+  // the first message, once again in the insert loop) — on a 200-thread mailbox
+  // that is thousands of redundant decodes per sync.
+  const decodedBodies = fullMsgs.map(msg => {
+    try {
+      return extractBody(msg);
+    } catch (_) {
+      return '';
+    }
+  });
+
   let firstBody = '';
   let airbnbThreadId = null;
   let airbnbReplyUrl = null;
   try {
-    firstBody = extractBody(firstMsg);
+    firstBody = decodedBodies[0] || '';
     // Try ALL messages to find the Airbnb thread ID.
     // Airbnb sends each notification (guest msg, host reply, booking update) as
     // a SEPARATE Gmail thread. Any message in any thread may contain the link.
@@ -407,11 +462,48 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     }
   } catch (_) {}
 
-  // Extract names
+  // ── Guest name resolution ──────────────────────────────────────────────
+  // Every Airbnb notification comes from "Airbnb <express@airbnb.com>", so the
+  // From display name is ALWAYS the literal string "Airbnb" — using it as a
+  // fallback is what made every row in the conversation list read "Airbnb".
+  // The traveller's name is instead recovered from the message content by
+  // guestNameExtractor, which scores each candidate so a later sync can only
+  // ever upgrade a weaker name, never swap two travellers around.
   let displayName, propertyName, matchedProperty;
+  let nameResult = { name: FALLBACK_GUEST_NAME, source: 'fallback', confidence: 0 };
 
   if (isAirbnb) {
-    displayName = extractGuestName(subject, firstBody) || senderDisplayName;
+    const threadEmails = fullMsgs.map((msg, i) => {
+      const msgHeaders = parseHeaders(msg);
+      const from = extractEmail(msgHeaders.from || '');
+      return {
+        subject: msgHeaders.subject || subject,
+        body: decodedBodies[i] || '',
+        // The host's own greeting ("Bonjour Florine,") only names the guest
+        // when the host is the one writing, so the role must be known here.
+        role: detectAirbnbMessageRole(msgHeaders.subject || '', decodedBodies[i] || '', account.email) === 'outgoing'
+          || from === String(account.email || '').toLowerCase()
+          ? 'outgoing'
+          : 'incoming',
+      };
+    });
+
+    // Record any name Airbnb tagged as host/co-host in this thread, so later
+    // threads of the same account inherit the exclusion.
+    for (const msgBody of decodedBodies) {
+      const { hostNames: found } = extractRoleBlocks(msgBody || '');
+      for (const name of found) knownHostNames.add(name);
+    }
+
+    nameResult = extractGuestNameFromThread(threadEmails, {
+      // Never let the host's own identity become the guest name.
+      knownHostNames: [
+        ...knownHostNames,
+        account.display_name,
+        extractName(account.email || ''),
+      ].filter(Boolean),
+    });
+    displayName = nameResult.name;
     propertyName = extractPropertyName(subject, firstBody);
     matchedProperty = matchProperty(propertyName, properties);
   } else {
@@ -438,6 +530,13 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
         'UPDATE conversations SET airbnb_reply_url = ? WHERE id = ? AND (airbnb_reply_url IS NULL OR airbnb_reply_url = "")',
         [airbnbReplyUrl, conversationId]
       );
+    }
+
+    // Upgrade the stored guest name when this sync found a better source.
+    // Guarded by shouldReplaceStoredName so a repeat sync can never flip an
+    // established conversation onto a different traveller.
+    if (isAirbnb) {
+      await maybeUpgradeGuestName(db, userId, conversationId, nameResult);
     }
 
     await db.query(
@@ -469,10 +568,23 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
 
     if (existingConvId) {
       conversationId = existingConvId;
+      if (isAirbnb) {
+        await maybeUpgradeGuestName(db, userId, conversationId, nameResult);
+      }
     } else {
       // ── Fallback: no airbnb_thread_id — try matching by guest name + property ──
       // This handles cases where the Airbnb URL extraction failed (changed URL format, etc.)
-      if (isAirbnb && displayName && displayName !== senderEmail) {
+      // Only a confidently-extracted, non-placeholder name may drive a merge:
+      // merging on "Voyageur" would collapse every unidentified thread of a
+      // property into a single conversation.
+      const canMergeByName =
+        isAirbnb &&
+        displayName &&
+        displayName !== senderEmail &&
+        displayName !== FALLBACK_GUEST_NAME &&
+        nameResult.confidence > 0;
+
+      if (canMergeByName) {
         const fallbackConvId = await findExistingConversationFallback(db, userId, displayName, matchedProperty);
         if (fallbackConvId) {
           conversationId = fallbackConvId;
@@ -499,9 +611,13 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
         }
 
         const convResult = await db.query(
-          `INSERT INTO conversations (user_id, title, booking_status, property_id, external_id, external_provider, guest_name, guest_language, airbnb_thread_id, airbnb_reply_url)
-           VALUES (?, ?, 'inquiry', ?, ?, 'gmail', ?, 'fr', ?, ?)`,
-          [userId, convTitle, matchedProperty ? matchedProperty.id : null, threadId, displayName, airbnbThreadId, airbnbReplyUrl]
+          `INSERT INTO conversations (user_id, title, booking_status, property_id, external_id, external_provider, guest_name, guest_name_source, guest_name_confidence, guest_language, airbnb_thread_id, airbnb_reply_url)
+           VALUES (?, ?, 'inquiry', ?, ?, 'gmail', ?, ?, ?, 'fr', ?, ?)`,
+          [
+            userId, convTitle, matchedProperty ? matchedProperty.id : null, threadId,
+            displayName, nameResult.source, nameResult.confidence,
+            airbnbThreadId, airbnbReplyUrl
+          ]
         );
         conversationId = convResult.insertId;
         logger.info(`Gmail sync thread ${threadId}: created new conversation ${conversationId} for "${displayName}"`);
@@ -518,19 +634,46 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
   }
 
   // Messages already fetched in full format — no extra API calls needed
-  const existingMsgIds = await getExistingGmailMessageIds(db, conversationId);
+  const { ids: existingMsgIds, needsHeaders } = await getExistingGmailMessageIds(db, conversationId);
   let newMessages = 0;
   let duplicates = 0;
+  // Counted separately from newMessages: only a GUEST message should trigger an
+  // automatic reply. Notifications echoing the host's own reply are stored as
+  // 'outgoing' and must not make Michel answer itself — that is the loop.
+  let newGuestMessages = 0;
   logger.info(`Gmail sync thread ${threadId}: ${fullMsgs.length} message(s) in thread, ${existingMsgIds.size} already in DB`);
 
-  for (const fullMsg of fullMsgs) {
+  // Latest message timestamp of the batch — the conversation's updated_at is
+  // written ONCE after the loop instead of once per inserted message.
+  let latestMsgDate = null;
+
+  for (let mi = 0; mi < fullMsgs.length; mi++) {
+    const fullMsg = fullMsgs[mi];
     if (existingMsgIds.has(fullMsg.id)) {
       duplicates++;
+      // Known message — but if it predates the reply-header capture, fill the
+      // headers in from the payload already in hand. COALESCE + the IS NULL
+      // guard make this idempotent, so it is a no-op on every later sync.
+      if (needsHeaders.has(fullMsg.id)) {
+        const h = parseHeaders(fullMsg);
+        if (h['reply-to'] || h['message-id']) {
+          await db.query(
+            `UPDATE messages
+                SET email_reply_to = COALESCE(email_reply_to, ?),
+                    email_message_id = COALESCE(email_message_id, ?),
+                    email_references = COALESCE(email_references, ?),
+                    email_subject = COALESCE(email_subject, ?)
+              WHERE gmail_message_id = ? AND conversation_id = ? AND email_reply_to IS NULL`,
+            [h['reply-to'] || null, h['message-id'] || null, h['references'] || null, h.subject || null, fullMsg.id, conversationId]
+          );
+          needsHeaders.delete(fullMsg.id);
+        }
+      }
       logger.info(`Gmail sync: skipping duplicate message ${fullMsg.id}`);
       continue;
     }
 
-    const body = extractBody(fullMsg);
+    const body = decodedBodies[mi] || '';
     if (!body.trim()) {
       logger.info(`Gmail sync: skipping message ${fullMsg.id} — empty body`);
       continue;
@@ -571,12 +714,36 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       ? new Date(parseInt(fullMsg.internalDate))
       : new Date();
 
+    // gmail_message_id is written to its own indexed column as well as into
+    // metadata_json: the de-duplication lookup used to read EVERY message row of
+    // the conversation and JSON.parse each one just to find these ids.
+    // Reply headers, captured at sync time and never afterwards.
+    //
+    // This is the ONLY place the reply address can legitimately come from: it
+    // is read off a message Gmail actually delivered to this account, for this
+    // conversation. emailReplyService refuses to send anywhere else, so a
+    // client can never nominate a recipient (see 017's header columns).
+    // Airbnb puts a per-thread routing token in Reply-To; From is always the
+    // unusable express@airbnb.com.
+    const emailReplyTo = msgHeaders['reply-to'] || null;
+    const emailMessageId = msgHeaders['message-id'] || null;
+    const emailReferences = msgHeaders['references'] || null;
+
     await db.query(
-      'INSERT INTO messages (conversation_id, role, content, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)',
+      `INSERT INTO messages
+        (conversation_id, role, content, gmail_message_id,
+         email_reply_to, email_message_id, email_references, email_subject,
+         metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         conversationId,
         role,
         cleanedMessage,
+        fullMsg.id,
+        emailReplyTo,
+        emailMessageId,
+        emailReferences,
+        msgSubject || null,
         JSON.stringify({
           source: 'gmail_sync',
           gmail_message_id: fullMsg.id,
@@ -590,90 +757,239 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
         msgDate
       ]
     );
-    // Touch updated_at so the conversation floats to the top of the inbox list
-    await db.query(
-      'UPDATE conversations SET updated_at = ? WHERE id = ?',
-      [msgDate, conversationId]
-    );
+    if (!latestMsgDate || msgDate > latestMsgDate) latestMsgDate = msgDate;
+    // Guard against re-inserting the same id twice within this same thread pass
+    // (Gmail can list a message under more than one thread during a merge).
+    existingMsgIds.add(fullMsg.id);
     logger.info(`Gmail sync: saved message ${fullMsg.id} (role=${role}) to conversation ${conversationId}`);
     newMessages++;
+    if (role === 'incoming') newGuestMessages++;
+  }
+
+  // Touch updated_at once so the conversation floats to the top of the inbox
+  // list — previously this ran once per message inserted.
+  if (latestMsgDate) {
+    await db.query(
+      'UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?',
+      [latestMsgDate, conversationId, userId]
+    );
   }
 
   logger.info(`Gmail sync thread ${threadId}: saved ${newMessages} new message(s), skipped ${duplicates} duplicate(s)`);
 
-  // After inserting new messages, extract Q&A pairs from this conversation
-  // so the AI can use them for future guests of the same property
+  // Extract Q&A pairs so the AI can reuse them for future guests of the same
+  // property. Deliberately NOT awaited: it is a best-effort enrichment, and
+  // blocking on it made every thread's sync wait on extra DB work.
   if (newMessages > 0) {
-    try {
-      const { extractConversationQA } = require('./propertyQAService');
-      await extractConversationQA(conversationId);
-    } catch (qaErr) {
-      logger.warn(`Q&A extraction failed for conversation ${conversationId}: ${qaErr.message}`);
-    }
+    setImmediate(() => {
+      try {
+        const { extractConversationQA } = require('./propertyQAService');
+        Promise.resolve(extractConversationQA(conversationId)).catch(qaErr => {
+          logger.warn(`Q&A extraction failed for conversation ${conversationId}: ${qaErr.message}`);
+        });
+      } catch (qaErr) {
+        logger.warn(`Q&A extraction failed for conversation ${conversationId}: ${qaErr.message}`);
+      }
+    });
+  }
+
+  // Automatic reply: book a slot for this conversation once a genuinely new
+  // GUEST message landed. Also off the critical path — scheduling only writes a
+  // queue row (the model runs later, in the worker), and a failure here must
+  // never take the sync down with it.
+  if (newGuestMessages > 0) {
+    setImmediate(() => {
+      try {
+        const autoReply = require('./autoReplyService');
+        Promise.resolve(
+          autoReply.scheduleForConversation({
+            userId,
+            conversationId,
+            propertyId: matchedProperty ? matchedProperty.id : null,
+          })
+        ).catch(err => {
+          logger.warn(`Auto-reply scheduling failed for conversation ${conversationId}: ${err.message}`);
+        });
+      } catch (err) {
+        logger.warn(`Auto-reply scheduling failed for conversation ${conversationId}: ${err.message}`);
+      }
+    });
   }
 
   return newMessages;
 }
 
 /**
- * Get already-synced Gmail message IDs for a conversation
+ * Get already-synced Gmail message IDs for a conversation.
+ *
+ * Reads the dedicated indexed gmail_message_id column instead of pulling every
+ * metadata_json blob of the conversation and JSON.parse-ing it — that old path
+ * was O(messages × bytes) on every thread of every sync cycle.
+ *
+ * Rows written before migration 013 have the id only inside metadata_json, so
+ * those are still parsed, but only for the rows the migration could not backfill.
  */
 async function getExistingGmailMessageIds(db, conversationId) {
+  const ids = new Set();
+  // Messages stored before migration 017 carry no reply headers, and the
+  // capture below only runs on INSERT — so they would stay unanswerable
+  // forever. Whenever a sync re-reads a thread we already know, we top the
+  // missing headers up from the payload we just fetched (no extra API call).
+  const needsHeaders = new Set();
+
   const rows = await db.query(
-    "SELECT metadata_json FROM messages WHERE conversation_id = ? AND metadata_json IS NOT NULL",
+    'SELECT gmail_message_id, email_reply_to FROM messages WHERE conversation_id = ? AND gmail_message_id IS NOT NULL',
     [conversationId]
   );
-  const ids = new Set();
   for (const row of rows) {
+    if (row.gmail_message_id) {
+      ids.add(row.gmail_message_id);
+      if (row.email_reply_to === null || row.email_reply_to === undefined) {
+        needsHeaders.add(row.gmail_message_id);
+      }
+    }
+  }
+
+  const legacyRows = await db.query(
+    "SELECT metadata_json FROM messages WHERE conversation_id = ? AND gmail_message_id IS NULL AND metadata_json IS NOT NULL",
+    [conversationId]
+  );
+  for (const row of legacyRows) {
     try {
       const meta = JSON.parse(row.metadata_json);
       if (meta.gmail_message_id) ids.add(meta.gmail_message_id);
     } catch (_) {}
   }
-  return ids;
+
+  return { ids, needsHeaders };
+}
+
+// Cap the stored host-name list: it should hold an owner plus a few co-hosts,
+// never grow without bound from a mis-parsed body.
+const MAX_HOST_NAMES = 25;
+
+/** Read the host names accumulated on a Gmail account row. */
+function loadHostNames(account) {
+  const set = new Set();
+  if (!account || !account.host_names_json) return set;
+  try {
+    const parsed = JSON.parse(account.host_names_json);
+    if (Array.isArray(parsed)) {
+      for (const name of parsed) {
+        if (typeof name === 'string' && name.trim()) set.add(name.trim());
+      }
+    }
+  } catch (_) {
+    // Colonne corrompue — on repart d'un ensemble vide, elle sera réécrite.
+  }
+  return set;
+}
+
+/** Persist newly discovered host names back onto the Gmail account row. */
+async function persistHostNames(db, accountId, hostNames) {
+  try {
+    const list = [...hostNames].slice(0, MAX_HOST_NAMES);
+    await db.query(
+      'UPDATE gmail_accounts SET host_names_json = ? WHERE id = ?',
+      [JSON.stringify(list), accountId]
+    );
+    logger.info(`Gmail sync: host names for account ${accountId} → ${list.join(', ')}`);
+  } catch (err) {
+    logger.warn(`Could not persist host names for account ${accountId}: ${err.message}`);
+  }
+}
+
+/**
+ * Persist a better guest name on an existing conversation.
+ *
+ * Rewrites the title too when it still carries the old name, so the inbox stops
+ * showing "Airbnb – La Villa Cosy" for a conversation we can now attribute.
+ * The user_id predicate is not redundant: it keeps a malformed conversation_id
+ * from ever letting one account's sync write into another account's row.
+ */
+async function maybeUpgradeGuestName(db, userId, conversationId, nameResult) {
+  if (!conversationId || !nameResult || !nameResult.name) return;
+
+  const rows = await db.query(
+    'SELECT guest_name, guest_name_confidence, title FROM conversations WHERE id = ? AND user_id = ?',
+    [conversationId, userId]
+  );
+  if (rows.length === 0) return;
+
+  const current = rows[0];
+  if (!shouldReplaceStoredName(current.guest_name, current.guest_name_confidence, nameResult)) return;
+
+  const oldName = current.guest_name;
+  let newTitle = current.title;
+  if (oldName && newTitle && newTitle.includes(oldName)) {
+    newTitle = newTitle.split(oldName).join(nameResult.name);
+  }
+
+  await db.query(
+    `UPDATE conversations
+     SET guest_name = ?, guest_name_source = ?, guest_name_confidence = ?, title = ?
+     WHERE id = ? AND user_id = ?`,
+    [nameResult.name, nameResult.source, nameResult.confidence, newTitle, conversationId, userId]
+  );
+
+  logger.info(
+    `Gmail sync: guest name upgraded for conversation ${conversationId}: ` +
+    `"${oldName || '(vide)'}" → "${nameResult.name}" (${nameResult.source}/${nameResult.confidence})`
+  );
 }
 
 /**
  * Fallback conversation matching when airbnb_thread_id extraction fails.
  * Tries to find an existing conversation for the same guest name (+ property if known).
  * Only matches conversations created within the last 90 days to avoid false positives.
+ *
+ * Two bugs fixed here:
+ *  1. The 90-day window used MySQL's DATE_SUB(NOW(), INTERVAL 90 DAY). The
+ *     SQLite adapter only rewrites NOW(), so the query became
+ *     `DATE_SUB(datetime('now'), INTERVAL 90 DAY)` — a hard syntax error that
+ *     made this function THROW on every call. The caller's try/catch swallowed
+ *     it as "thread failed", so the de-duplication path never actually ran and
+ *     each notification mail kept creating a brand-new conversation. The cutoff
+ *     is now computed in JS and passed as a bound parameter, which is portable.
+ *  2. It merged on first name alone, so two different travellers called "Marie"
+ *     on the same property collapsed into one thread. Matching is now exact on
+ *     the full normalised name.
  */
 async function findExistingConversationFallback(db, userId, guestName, matchedProperty) {
   if (!guestName) return null;
 
-  const normalizedName = guestName.trim().toLowerCase();
+  const normalizedName = nameKey(guestName);
+  if (!normalizedName) return null;
 
-  // Build query — if we know the property, constrain to it for higher confidence
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+
+  // If we know the property, constrain to it for higher confidence
   let rows;
   if (matchedProperty) {
     rows = await db.query(
       `SELECT id, guest_name FROM conversations
        WHERE user_id = ? AND property_id = ?
          AND external_provider = 'gmail'
-         AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+         AND created_at >= ?
        ORDER BY updated_at DESC LIMIT 20`,
-      [userId, matchedProperty.id]
+      [userId, matchedProperty.id, cutoff]
     );
   } else {
     rows = await db.query(
       `SELECT id, guest_name FROM conversations
        WHERE user_id = ?
          AND external_provider = 'gmail'
-         AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+         AND created_at >= ?
        ORDER BY updated_at DESC LIMIT 40`,
-      [userId]
+      [userId, cutoff]
     );
   }
 
   for (const row of rows) {
     if (!row.guest_name) continue;
-    const existing = row.guest_name.trim().toLowerCase();
-    // Exact match
-    if (existing === normalizedName) return row.id;
-    // First-name-only match (both must have at least 3 chars)
-    const existingFirst = existing.split(' ')[0];
-    const newFirst = normalizedName.split(' ')[0];
-    if (existingFirst.length >= 3 && existingFirst === newFirst) return row.id;
+    // Exact match only — merging on the first name alone mixed up distinct
+    // travellers who happen to share one.
+    if (nameKey(row.guest_name) === normalizedName) return row.id;
   }
 
   return null;
@@ -878,52 +1194,14 @@ function extractName(fromStr) {
 // ================================================================
 
 /**
- * Extract guest name from Airbnb notification email.
- * Airbnb subjects look like:
- *   "Nouveau message de Jean" / "New message from Jean"
- *   "Jean vous a envoyé un message"
- *   "Demande de réservation de Jean pour ..."
- *   "Nouvelle demande de renseignement de Jean"
+ * NOTE: the former extractGuestName() lived here. It matched loose,
+ * unvalidated patterns ("de X", "from X", "X arrive") anywhere in the body and
+ * had no stopword filtering, which is where guest names like "dernière m",
+ * "lit p", "votre s" and "to" in the conversations table came from — and when
+ * it found nothing the caller fell back to the From display name, i.e. the
+ * literal "Airbnb". It is replaced by services/guestNameExtractor.js, which
+ * validates every candidate and scores it by source.
  */
-function extractGuestName(subject, body) {
-  // Try subject patterns first (most reliable)
-  const subjectPatterns = [
-    // FR: "Objet : Réservation pour ..." — contains property name but body has guest info
-    // FR: "Nouveau message de Jean"
-    /(?:nouveau|nouvelle)\s+(?:message|demande)[^]*?de\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)?)/i,
-    // FR: "Jean vous a envoyé un message"
-    /^([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)?)\s+vous\s+a\s+envoy/i,
-    // EN: "New message from Jean"
-    /new\s+message\s+from\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)?)/i,
-    // EN: "Reservation request from Jean"
-    /(?:reservation|booking)\s+(?:request|inquiry)\s+from\s+([A-ZÀ-Ü][a-zà-ü]+)/i,
-    // FR: "Jean a fait une demande"
-    /^([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü]\.?)?)\s+(?:a\s+fait|souhaite|demande)/i,
-  ];
-
-  for (const regex of subjectPatterns) {
-    const match = subject.match(regex);
-    if (match) return match[1].trim();
-  }
-
-  // Try body patterns
-  const bodyPatterns = [
-    /message\s+de\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)?)/i,
-    /de\s+la\s+part\s+de\s+([A-ZÀ-Ü][a-zà-ü]+)/i,
-    /from\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)?)/i,
-    // FR: "Réservation de Jean" or "Demande de Jean"
-    /(?:réservation|demande)\s+de\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü]\.?)?)/i,
-    // FR: "Jean arrive le..." / "Jean part le..."
-    /([A-ZÀ-Ü][a-zà-ü]+)\s+(?:arrive|part|séjourne|checke?)\s/i,
-  ];
-
-  for (const regex of bodyPatterns) {
-    const match = body.match(regex);
-    if (match) return match[1].trim();
-  }
-
-  return null;
-}
 
 /**
  * Extract the property/listing name from an Airbnb notification email.
@@ -1306,15 +1584,33 @@ async function finishSyncLog(db, syncLogId, synced, accountId) {
 /**
  * Generate the Google OAuth2 consent URL
  */
+/**
+ * Scopes requested at consent.
+ *
+ * gmail.send was added for the reply feature: Michel answers the guest by
+ * replying to Airbnb's notification mail from the host's own mailbox. It grants
+ * sending ONLY — it cannot read, modify or delete anything, which readonly
+ * already covers separately.
+ *
+ * Accounts connected before this change hold a token without gmail.send and
+ * must go through "Réautoriser" (see hasSendScope / gmailController.reauthorize);
+ * sending fails with GMAIL_SEND_SCOPE_MISSING until they do.
+ */
+const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/userinfo.email',
+];
+
 function getAuthUrl(state, loginHint) {
   const oauth2 = makeOAuth2Client();
   const opts = {
     access_type: 'offline',
     prompt: 'consent',
-    scope: [
-      'https://www.googleapis.com/auth/gmail.readonly',
-      'https://www.googleapis.com/auth/userinfo.email'
-    ]
+    // include_granted_scopes keeps previously granted scopes when a connected
+    // account re-consents, so re-authorising never silently drops read access.
+    include_granted_scopes: true,
+    scope: GMAIL_SCOPES,
   };
   if (state) opts.state = state;
   if (loginHint) opts.login_hint = loginHint;
@@ -1356,8 +1652,19 @@ async function exchangeCode(code) {
     email: profile.data.emailAddress,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token || null,
-    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null
+    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+    // Recorded so the UI can say "réautorisation nécessaire" up front instead of
+    // letting the first send fail. Google returns the scopes actually granted,
+    // which is not always what was asked for.
+    grantedScopes: tokens.scope || '',
+    canSend: hasSendScope(tokens.scope),
   };
+}
+
+/** Does this scope string allow users.messages.send? */
+function hasSendScope(scopeString) {
+  const scopes = String(scopeString || '').split(/[\s,]+/).filter(Boolean);
+  return scopes.some((s) => /gmail\.send|gmail\.modify|mail\.google\.com/.test(s));
 }
 
 /**
@@ -1368,14 +1675,21 @@ async function exchangeCode(code) {
 async function purgeNonAirbnbConversations(userId) {
   const db = getDatabase();
 
-  // Find gmail_threads that are NOT from Airbnb
+  // Find gmail_threads that are NOT from Airbnb.
+  // The INNER JOIN on conversations is a safety boundary, not decoration: the
+  // old version trusted gmail_threads.conversation_id on its own and issued
+  // `DELETE FROM messages WHERE conversation_id = ?` before any ownership check,
+  // so a row pointing at another account's conversation (which the insertId race
+  // in db/database.js could produce) wiped that account's messages. Joining
+  // through conversations.user_id makes a foreign conversation simply not match.
   const nonAirbnbThreads = await db.query(
     `SELECT gt.id, gt.conversation_id, gt.sender_email
      FROM gmail_threads gt
+     INNER JOIN conversations c ON c.id = gt.conversation_id AND c.user_id = ?
      WHERE gt.user_id = ?
        AND gt.sender_email NOT LIKE '%airbnb.com'
        AND gt.sender_email NOT LIKE '%airbnb.fr'`,
-    [userId]
+    [userId, userId]
   );
 
   if (nonAirbnbThreads.length === 0) {
@@ -1386,10 +1700,16 @@ async function purgeNonAirbnbConversations(userId) {
   let deleted = 0;
   for (const thread of nonAirbnbThreads) {
     try {
-      // Delete messages first (FK constraint)
-      await db.query('DELETE FROM messages WHERE conversation_id = ?', [thread.conversation_id]);
+      // Delete messages first (FK constraint) — scoped to the owning user so a
+      // stale conversation_id can never reach across accounts.
+      await db.query(
+        `DELETE FROM messages WHERE conversation_id IN (
+           SELECT id FROM conversations WHERE id = ? AND user_id = ?
+         )`,
+        [thread.conversation_id, userId]
+      );
       // Delete the gmail_thread record
-      await db.query('DELETE FROM gmail_threads WHERE id = ?', [thread.id]);
+      await db.query('DELETE FROM gmail_threads WHERE id = ? AND user_id = ?', [thread.id, userId]);
       // Delete the conversation
       await db.query('DELETE FROM conversations WHERE id = ? AND user_id = ?', [thread.conversation_id, userId]);
       deleted++;
@@ -1410,5 +1730,11 @@ module.exports = {
   getUserGmailAccounts,
   deactivateAccount,
   fetchMessages,
-  purgeNonAirbnbConversations
+  purgeNonAirbnbConversations,
+  // Exposés pour les scripts d'audit lecture seule (scripts/audit-missing-messages.js) :
+  // reproduire exactement le filtrage du sync est le seul moyen de classer un
+  // message manquant par cause réelle plutôt que par supposition.
+  __extractBody: extractBody,
+  __extractAirbnbMessage: extractAirbnbMessage,
+  __detectAirbnbMessageRole: detectAirbnbMessageRole
 };

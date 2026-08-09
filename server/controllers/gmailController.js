@@ -110,17 +110,21 @@ async function oauthCallback(req, res) {
 
     logger.info(`Gmail account added: ${email} for user ${userId}`);
 
-    // Trigger immediate sync
-    try {
-      const syncResult = await gmailSync.fetchMessages(userId, accountId);
-      logger.info(`Gmail initial sync: ${syncResult.synced} messages for ${email}`);
-      return renderPage('Gmail connecté !',
-        `${email} ajouté avec succès. ${syncResult.synced} message(s) synchronisé(s).`, false);
-    } catch (syncErr) {
-      logger.warn('Initial Gmail sync failed (account still saved):', syncErr.message);
-      return renderPage('Gmail connecté !',
-        `${email} ajouté avec succès. La synchronisation démarrera sous 60 secondes.`, false);
-    }
+    // Kick off the first sync WITHOUT blocking the OAuth redirect.
+    // A first-time sync walks every Airbnb thread in the mailbox and can run
+    // for minutes; awaiting it here left the user on a blank Google redirect
+    // until the request timed out, and the account looked like it had failed to
+    // connect even though it was already saved. The scheduler would have picked
+    // it up within 60s anyway — now it starts immediately in the background and
+    // the browser gets its confirmation page straight away.
+    setImmediate(() => {
+      gmailSync.fetchMessages(userId, accountId)
+        .then(result => logger.info(`Gmail initial sync: ${result.synced} messages for ${email}`))
+        .catch(syncErr => logger.warn(`Initial Gmail sync failed (account still saved): ${syncErr.message}`));
+    });
+
+    return renderPage('Gmail connecté !',
+      `${email} ajouté avec succès. La synchronisation de vos conversations est en cours.`, false);
   } catch (err) {
     logger.error('Gmail callback exchange error:', err);
 
@@ -304,7 +308,7 @@ async function logAudit(req, action, entityType, entityId) {
 async function purgeNonAirbnb(req, res) {
   try {
     const deleted = await gmailSync.purgeNonAirbnbConversations(req.userId);
-    await auditLog(req, 'gmail_purge_non_airbnb', 'gmail_account', null);
+    await logAudit(req, 'gmail_purge_non_airbnb', 'gmail_account', null);
     return res.json({ success: true, deleted });
   } catch (error) {
     logger.error('Purge non-Airbnb error:', error);

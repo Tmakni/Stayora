@@ -113,6 +113,8 @@ export const api = {
     me: () => request('/api/auth/me'),
     refresh: (token) => request('/api/auth/refresh', { method: 'POST', body: { token } }),
     changePassword: (payload) => request('/api/auth/password', { method: 'PUT', body: payload }),
+    requestPasswordReset: (email) => request('/api/auth/forgot-password', { method: 'POST', body: { email } }),
+    resetPassword: (payload) => request('/api/auth/reset-password', { method: 'POST', body: payload }),
   },
 
   properties: {
@@ -133,12 +135,20 @@ export const api = {
   },
 
   conversations: {
-    list: () => request('/api/conversations').then((d) => d.conversations || []),
+    // Returns the raw envelope ({ conversations, limit, offset, has_more }) so
+    // callers can page. `.list()` with no args keeps the previous behaviour of
+    // fetching the first page.
+    list: (params) => request('/api/conversations', { params }),
     get: (id) => request(`/api/conversations/${id}`),
     create: (payload) => request('/api/conversations', { method: 'POST', body: payload }),
     update: (id, payload) => request(`/api/conversations/${id}`, { method: 'PUT', body: payload }),
     addMessage: (id, payload) => request(`/api/conversations/${id}/messages`, { method: 'POST', body: payload }),
     sendAirbnb: (id, message) => request(`/api/conversations/${id}/send-airbnb`, { method: 'POST', body: { message } }),
+    // Réponse par e-mail : on n'envoie que du TEXTE. Le destinataire est résolu
+    // côté serveur depuis les en-têtes du mail Airbnb reçu (jamais par le client).
+    reply: (id, message) => request(`/api/conversations/${id}/reply`, { method: 'POST', body: { message } }),
+    replyStatus: (id) => request(`/api/conversations/${id}/reply-status`),
+    retryReply: (id, queueId) => request(`/api/conversations/${id}/reply/${queueId}/retry`, { method: 'POST' }),
   },
 
   ai: {
@@ -159,6 +169,11 @@ export const api = {
     removeAccount: (id) => request(`/api/gmail/accounts/${id}`, { method: 'DELETE' }),
     reauthorize: (accountId) => request(`/api/gmail/reauthorize/${accountId}`),
     purgeNonAirbnb: () => request('/api/gmail/purge-non-airbnb', { method: 'DELETE' }),
+  },
+
+  settings: {
+    getAutoReply: () => request('/api/settings/auto-reply'),
+    updateAutoReply: (payload) => request('/api/settings/auto-reply', { method: 'PUT', body: payload }),
   },
 
   sync: {

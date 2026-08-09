@@ -29,6 +29,7 @@ const { generateDraftReply } = require('../services/aiService');
 const config = require('../config/env');
 const logger = require('../utils/logger');
 const { broadcastNewMessage, broadcastConversationUpdate } = require('../services/syncScheduler');
+const { shouldAutoSend, describeReason } = require('../services/replyGuard');
 
 /**
  * Verify Superhot webhook signature (HMAC-SHA256)
@@ -219,36 +220,93 @@ async function handleSuperhot(req, res) {
       return;
     }
 
-    // Save AI draft as outgoing message
+    // Point de contrôle unique : décide si ce brouillon peut partir seul.
+    // Couvre notamment les messages de simple politesse ("merci"), les
+    // brouillons vides et les sujets sensibles — autant de cas où l'ancien
+    // code envoyait quand même, y compris un message vide au voyageur.
+    const verdict = shouldAutoSend(aiResult, {
+      incomingMessage: messageBody,
+      autoReplyEnabled,
+    });
+
+    // Rien à répondre du tout : on ne stocke pas de brouillon vide, on trace.
+    if (verdict.reason === 'no_reply_needed' || verdict.reason === 'courtesy_message') {
+      logger.info(`No reply needed for conversation ${conversation.id} (${verdict.reason})`);
+      if (logId) {
+        await db.query(
+          'UPDATE webhook_logs SET processed=1, conversation_id=?, auto_replied=0, user_id=? WHERE id=?',
+          [conversation.id, userId, logId]
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    const draft = (aiResult.draft_reply || '').trim();
+
+    // Brouillon inexploitable (vide, tronqué, champ non complété) : on prévient
+    // l'hôte au lieu de laisser une bulle vide dans le fil de discussion.
+    if (!draft) {
+      await db.query(
+        `INSERT INTO messages (conversation_id, role, content, metadata_json) VALUES (?, 'system', ?, ?)`,
+        [
+          conversation.id,
+          `Michel n'a pas pu préparer de réponse. ${describeReason(verdict.reason)}`,
+          JSON.stringify({ ...aiResult, source: 'ai_no_draft', auto_sent: false, guard_reason: verdict.reason }),
+        ]
+      );
+      logger.warn(`Empty draft for conversation ${conversation.id} (${verdict.reason}) — host notified`);
+      if (logId) {
+        await db.query(
+          'UPDATE webhook_logs SET processed=1, conversation_id=?, auto_replied=0, user_id=? WHERE id=?',
+          [conversation.id, userId, logId]
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    // Le brouillon est conservé dans tous les cas — c'est l'ENVOI qui est
+    // conditionné. L'hôte garde ainsi une proposition prête à relire/envoyer.
     await db.query(
       `INSERT INTO messages (conversation_id, role, content, metadata_json) VALUES (?, 'outgoing', ?, ?)`,
-      [conversation.id, aiResult.draft_reply, JSON.stringify({ ...aiResult, source: 'ai_auto', auto_sent: autoReplyEnabled })]
+      [
+        conversation.id,
+        draft,
+        JSON.stringify({
+          ...aiResult,
+          source: 'ai_auto',
+          auto_sent: verdict.allowed,
+          guard_reason: verdict.reason,
+        }),
+      ]
     );
 
     // Notify connected clients of AI reply
     if (userId) {
-      broadcastNewMessage(userId, conversation.id, { role: 'outgoing', content: aiResult.draft_reply });
+      broadcastNewMessage(userId, conversation.id, { role: 'outgoing', content: draft });
     }
 
-    // If auto-reply is active – send via Superhot API
-    if (autoReplyEnabled && config.superhot.apiKey) {
+    let autoSent = false;
+    if (verdict.allowed && config.superhot.apiKey) {
       try {
-        await sendSuperhot(externalConvId, aiResult.draft_reply);
+        await sendSuperhot(externalConvId, draft);
+        autoSent = true;
         logger.info(`Auto-reply sent via Superhot for conversation ${conversation.id}`);
       } catch (sendErr) {
         logger.error('Failed to send via Superhot API:', sendErr.message);
       }
+    } else if (!verdict.allowed) {
+      logger.info(`Auto-send withheld for conversation ${conversation.id}: ${verdict.reason} — draft saved for host review`);
     }
 
     // Update webhook log
     if (logId) {
       await db.query(
         `UPDATE webhook_logs SET processed=1, conversation_id=?, auto_replied=?, user_id=? WHERE id=?`,
-        [conversation.id, autoReplyEnabled ? 1 : 0, userId, logId]
+        [conversation.id, autoSent ? 1 : 0, userId, logId]
       ).catch(() => {});
     }
 
-    logger.info(`Webhook processed: conv ${conversation.id}, auto_reply=${autoReplyEnabled}`);
+    logger.info(`Webhook processed: conv ${conversation.id}, auto_sent=${autoSent} (${verdict.reason})`);
   } catch (err) {
     logger.error('Webhook processing error:', err);
     if (logId) {

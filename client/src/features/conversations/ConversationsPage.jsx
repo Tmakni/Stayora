@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MessageSquare } from 'lucide-react';
 import { ConversationList } from './ConversationList';
@@ -35,6 +35,10 @@ export function ConversationsPage() {
     }
   }
 
+  // Stable reference so ConversationList's memoized rows don't all re-render
+  // just because ConversationsPage re-rendered (e.g. on every polling refetch).
+  const handleSelectConversation = useCallback((cid) => navigate(`/conversations/${cid}`), [navigate]);
+
   return (
     <div className="flex h-full">
       <div className={cn('w-full shrink-0 lg:block lg:w-[340px] lg:border-r lg:border-border', id && 'hidden lg:block')}>
@@ -45,7 +49,10 @@ export function ConversationsPage() {
           isLoading={conversationsQuery.isLoading}
           isError={conversationsQuery.isError}
           onRetry={conversationsQuery.refetch}
-          onSelect={(cid) => navigate(`/conversations/${cid}`)}
+          hasMore={conversationsQuery.hasNextPage}
+          isLoadingMore={conversationsQuery.isFetchingNextPage}
+          onLoadMore={conversationsQuery.fetchNextPage}
+          onSelect={handleSelectConversation}
           onNewConversation={() => setNewDialogOpen(true)}
           onConnectGmail={() => navigate('/integrations')}
         />

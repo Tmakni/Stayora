@@ -4,7 +4,7 @@ import { MichelMark } from '../shared/MichelMark';
 import { useAuth } from '../../lib/auth.jsx';
 import { useMichelActiveStatus } from '../../hooks/useIntegrations';
 import { useConversations } from '../../hooks/useConversations';
-import { initials, truncate } from '../../lib/utils';
+import { initials, truncate, guestDisplayName } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import {
@@ -37,7 +37,9 @@ export function TopHeader({ onOpenMobileNav }) {
         </Button>
       </div>
 
-      <Link to="/" className="flex items-center gap-2 justify-self-center">
+      {/* Negative margin keeps the visual position identical while giving the
+          link a full-height (44px+) tap target on touch devices. */}
+      <Link to="/" className="-my-2 flex min-h-11 items-center gap-2 justify-self-center px-2 py-2">
         <MichelMark className="size-6" />
         <span className="text-[15px] font-semibold tracking-tight text-foreground">Michel</span>
       </Link>
@@ -69,7 +71,7 @@ export function TopHeader({ onOpenMobileNav }) {
             {needsAttention.map((c) => (
               <DropdownMenuItem key={c.id} onSelect={() => navigate(`/conversations/${c.id}`)}>
                 <span className="flex flex-col gap-0.5">
-                  <span className="font-medium text-foreground">{c.guest_name || c.title}</span>
+                  <span className="font-medium text-foreground">{guestDisplayName(c)}</span>
                   <span className="text-xs text-muted-foreground">
                     {truncate(c.last_message || 'Nouvelle conversation', 60)}
                   </span>

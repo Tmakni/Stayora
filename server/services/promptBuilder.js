@@ -1,11 +1,26 @@
 // Construction du prompt pour OpenAI
 const { buildStylePromptSection } = require('./hostStyleService');
+const logger = require('../utils/logger');
+
+/**
+ * Safely coerce propertyContext into an object.
+ * propertyContext is normally already a parsed object by the time it reaches
+ * here (every caller pre-parses context_json in a try/catch), but this stays
+ * defensive: a malformed/non-JSON string must never crash the process.
+ */
+function safeParsePropertyContext(propertyContext) {
+  if (typeof propertyContext !== 'string') return propertyContext || {};
+  try {
+    return JSON.parse(propertyContext);
+  } catch (err) {
+    logger.warn('promptBuilder: failed to parse propertyContext JSON, using empty context:', err.message);
+    return {};
+  }
+}
 
 function buildSystemPrompt(propertyContext, hostStyle) {
-  const context = typeof propertyContext === 'string' 
-    ? JSON.parse(propertyContext) 
-    : propertyContext;
-  
+  const context = safeParsePropertyContext(propertyContext);
+
   const hostSignature = context.host_name || '';
   const signatureInstruction = hostSignature
     ? `Tu signes toujours tes messages avec le prénom "${hostSignature}".`
@@ -417,7 +432,7 @@ function detectLanguage(text) {
  */
 function buildFineTunedPrompt(incomingMessage, conversationHistory, bookingStatus, guestProfile, propertyContext, hostStyle) {
   // Handle when called with positional args from aiService
-  const context = typeof propertyContext === 'string' ? JSON.parse(propertyContext) : (propertyContext || {});
+  const context = safeParsePropertyContext(propertyContext);
   
   // Detect language from full conversation
   const allIncomingText = (conversationHistory || [])

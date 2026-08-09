@@ -33,10 +33,17 @@ function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
-    // 3. Verify token — enforce HS256 to prevent algorithm confusion attacks
+    // 3. Verify token — enforce HS256 to prevent algorithm confusion attacks.
+    // maxAge is derived from config.jwt.expiresIn (JWT_EXPIRES_IN) rather than
+    // hardcoded, so this redundant iat-based check always agrees with the exp
+    // claim jwt.sign() actually put in the token (see authController.js) —
+    // previously this was hardcoded to '7d' independent of JWT_EXPIRES_IN, so
+    // raising JWT_EXPIRES_IN above 7 days would have made tokens appear to
+    // expire after 7 days anyway ("Token expired") while a shorter value was
+    // already enforced by the exp claim itself.
     const decoded = jwt.verify(token, config.jwt.secret, {
       algorithms: ['HS256'],
-      maxAge: '7d',
+      maxAge: config.jwt.expiresIn,
     });
 
     // 4. Validate payload shape

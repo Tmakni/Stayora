@@ -29,28 +29,48 @@ export function CalendarMonthGrid({ days, monthDate, events, onDayClick }) {
               type="button"
               onClick={() => onDayClick(day, dayEvents)}
               className={cn(
-                'flex min-h-[92px] flex-col items-stretch gap-1 border-b border-r border-border p-1.5 text-left transition-colors last:border-r-0 hover:bg-surface-hover',
+                // min-w-0 lets the 7 columns actually shrink to a 360px screen
+                // instead of forcing the grid wider than the viewport.
+                'flex min-h-[72px] min-w-0 flex-col items-stretch gap-1 overflow-hidden border-b border-r border-border p-1 text-left transition-colors last:border-r-0 hover:bg-surface-hover sm:min-h-[92px] sm:p-1.5',
                 !inMonth && 'bg-muted/30 text-muted-foreground/50'
               )}
             >
               <span
                 className={cn(
-                  'flex size-6 items-center justify-center rounded-full text-xs font-medium',
+                  'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium',
                   isToday && 'bg-primary text-primary-foreground'
                 )}
               >
                 {format(day, 'd')}
               </span>
-              <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                {dayEvents.slice(0, 2).map((e) => {
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
+                {/* One chip fits a phone column; two fit from `sm` up. */}
+                {dayEvents.slice(0, 2).map((e, i) => {
                   const cfg = getEventConfig(e.type);
                   return (
-                    <span key={e.id} className={cn('truncate rounded px-1 py-0.5 text-[10px] font-medium', cfg.bg, cfg.text)}>
+                    <span
+                      key={e.id}
+                      className={cn(
+                        'truncate rounded px-1 py-0.5 text-[10px] font-medium',
+                        i > 0 && 'hidden sm:block',
+                        cfg.bg,
+                        cfg.text
+                      )}
+                    >
                       {e.title}
                     </span>
                   );
                 })}
-                {dayEvents.length > 2 && <span className="px-1 text-[10px] font-medium text-muted-foreground">+{dayEvents.length - 2} de plus</span>}
+                {dayEvents.length > 1 && (
+                  <span className="truncate px-1 text-[10px] font-medium text-muted-foreground sm:hidden">
+                    +{dayEvents.length - 1}
+                  </span>
+                )}
+                {dayEvents.length > 2 && (
+                  <span className="hidden truncate px-1 text-[10px] font-medium text-muted-foreground sm:block">
+                    +{dayEvents.length - 2} de plus
+                  </span>
+                )}
               </div>
             </button>
           );

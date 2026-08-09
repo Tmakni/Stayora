@@ -26,7 +26,7 @@ import { useConversations } from '../../hooks/useConversations';
 import { useProperties } from '../../hooks/useProperties';
 import { useMichelActiveStatus } from '../../hooks/useIntegrations';
 import { buildDashboardInsights, formatMinutes } from '../../lib/insights';
-import { avatarColor, initials, truncate, formatDate } from '../../lib/utils';
+import { avatarColor, initials, truncate, formatDate, guestDisplayName } from '../../lib/utils';
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -101,7 +101,7 @@ export function DashboardPage() {
                   tone="primary"
                   title="Réponses à valider"
                   count={insights.pending.length}
-                  description={insights.pending[0] ? `${insights.pending[0].guest_name || insights.pending[0].title}` : 'Aucune en attente'}
+                  description={insights.pending[0] ? `${guestDisplayName(insights.pending[0])}` : 'Aucune en attente'}
                   onClick={() => navigate('/conversations')}
                 />
                 <PriorityTaskCard
@@ -168,11 +168,11 @@ export function DashboardPage() {
                     className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-hover"
                   >
                     <span className={`flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarColor(c.id)}`}>
-                      {initials(c.guest_name || c.title)}
+                      {initials(guestDisplayName(c))}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">{c.guest_name || c.title}</span>
+                        <span className="truncate text-sm font-medium text-foreground">{guestDisplayName(c)}</span>
                         <PlatformBadge conversation={c} dotOnly />
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-muted-foreground">{truncate(c.last_message || 'Nouvelle conversation', 70)}</span>

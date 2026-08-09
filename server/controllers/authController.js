@@ -1,16 +1,56 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const config = require('../config/env');
 const { getDatabase } = require('../config/db');
 const { sanitizeEmail, sanitizeString } = require('../utils/sanitize');
 const logger = require('../utils/logger');
+
+// Generic response for forgot-password — never reveals whether an email is registered
+const FORGOT_PASSWORD_GENERIC_MESSAGE =
+  'Si un compte existe avec cet email, vous recevrez un lien de réinitialisation.';
+
+// Reset tokens are valid for 1 hour
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Resolves the app's own public base URL (no trailing slash), for building
+ * links inside transactional emails. Mirrors the precedent set in
+ * server/server.js for CORS origin resolution.
+ */
+function getAppBaseUrl() {
+  const configured = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL;
+  if (configured) return configured.replace(/\/$/, '');
+  return config.isProd ? '' : 'http://localhost:3000';
+}
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Parses a jsonwebtoken-style duration ("7d", "24h", "3600", 3600) into
+ * milliseconds, so the cookie's lifetime always matches config.jwt.expiresIn
+ * instead of drifting from a separately hardcoded value.
+ */
+function parseDurationMs(value, fallbackMs) {
+  if (typeof value === 'number') return value * 1000;
+  if (typeof value === 'string') {
+    const match = value.trim().match(/^(\d+)\s*(ms|s|m|h|d|w|y)?$/i);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      const unit = (match[2] || 's').toLowerCase();
+      const multipliers = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000, y: 31536000000 };
+      return n * (multipliers[unit] || 1000);
+    }
+  }
+  return fallbackMs;
+}
 
 // Cookie options — shared by all auth endpoints
 function cookieOptions() {
   return {
     httpOnly: true,
     secure: config.isProd,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: parseDurationMs(config.jwt.expiresIn, SEVEN_DAYS_MS),
     sameSite: 'strict',
     path: '/',
   };
@@ -46,7 +86,11 @@ async function register(req, res) {
     );
 
     if (existing.length > 0) {
-      // Same generic message as login failure — prevent email enumeration
+      // Deliberately vague — never states that the email is already taken.
+      // Note this only *reduces* enumeration: registration must still fail for
+      // a taken email, so success-vs-failure remains an oracle. Fully closing
+      // it requires always returning 201 and emailing the existing account
+      // instead ("someone tried to register with your address").
       return res.status(400).json({ error: 'Registration failed. Please check your information.' });
     }
 
@@ -377,10 +421,200 @@ async function sendPasswordChangedEmail(email) {
   }
 }
 
+/**
+ * Sends the password-reset link email. Falls back to a log if no email
+ * transport is configured (same graceful-degradation pattern as
+ * sendPasswordChangedEmail, so the flow works in dev without SMTP creds).
+ */
+async function sendPasswordResetEmail(email, resetUrl) {
+  try {
+    const nodemailer = require('nodemailer');
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+
+    if (!smtpUser || !smtpPass) {
+      logger.info(`[PASSWORD_RESET_EMAIL] Would send to ${email}: "Cliquez ici pour réinitialiser votre mot de passe : ${resetUrl}" (valide 1 heure)`);
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass }
+    });
+
+    await transporter.sendMail({
+      from: `"Michel – HostAI" <${smtpUser}>`,
+      to: email,
+      subject: 'Réinitialisation de votre mot de passe',
+      text: `Bonjour,\n\nVous avez demandé la réinitialisation de votre mot de passe.\n\nCliquez sur le lien suivant pour choisir un nouveau mot de passe (valide 1 heure) :\n${resetUrl}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez cet email — votre mot de passe restera inchangé.\n\nL'équipe Michel`,
+      html: `<p>Bonjour,</p><p>Vous avez demandé la réinitialisation de votre mot de passe.</p><p><a href="${resetUrl}">Cliquez ici pour choisir un nouveau mot de passe</a> (valide 1 heure).</p><p>Si vous n'êtes <strong>pas</strong> à l'origine de cette demande, ignorez cet email — votre mot de passe restera inchangé.</p><p>L'équipe Michel</p>`
+    });
+
+    logger.info(`Password reset email sent to ${email}`);
+  } catch (err) {
+    throw err;
+  }
+}
+
+/**
+ * POST /api/auth/forgot-password
+ * Body: { email }
+ *
+ * Always returns the same generic success response, whether or not the
+ * email is registered, to prevent account enumeration (mirrors the
+ * constant-response pattern already used in login/register).
+ */
+async function forgotPassword(req, res) {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Email requis.' });
+    }
+
+    let cleanEmail;
+    try {
+      cleanEmail = sanitizeEmail(email);
+    } catch (_err) {
+      // Invalid email format — still return the generic message, don't leak validation details
+      return res.json({ success: true, message: FORGOT_PASSWORD_GENERIC_MESSAGE });
+    }
+
+    const db = getDatabase();
+
+    const users = await db.query('SELECT id, email FROM users WHERE email = ?', [cleanEmail]);
+
+    if (users.length > 0) {
+      const user = users[0];
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+
+      await db.query(
+        'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+        [user.id, tokenHash, expiresAt]
+      );
+
+      const resetUrl = `${getAppBaseUrl()}/reset-password?token=${rawToken}`;
+
+      try {
+        await sendPasswordResetEmail(user.email, resetUrl);
+      } catch (emailErr) {
+        logger.warn(`Password reset email failed for ${user.email}: ${emailErr.message}`);
+        // Not fatal — still return the generic success response below
+      }
+
+      logger.info(`Password reset requested for user ${user.id}`);
+    }
+
+    return res.json({ success: true, message: FORGOT_PASSWORD_GENERIC_MESSAGE });
+  } catch (error) {
+    logger.error('Forgot password error:', error);
+    // Even on unexpected error, avoid leaking whether the account exists
+    return res.json({ success: true, message: FORGOT_PASSWORD_GENERIC_MESSAGE });
+  }
+}
+
+/**
+ * POST /api/auth/reset-password
+ * Body: { token, newPassword, confirmPassword }
+ */
+async function resetPassword(req, res) {
+  try {
+    const { token, newPassword, confirmPassword } = req.body;
+
+    if (!token || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: 'Tous les champs sont requis.' });
+    }
+
+    if (typeof token !== 'string' || typeof newPassword !== 'string' || typeof confirmPassword !== 'string') {
+      return res.status(400).json({ error: 'Données invalides.' });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'Les mots de passe ne correspondent pas.' });
+    }
+
+    // Same complexity rules as register()/changePassword()
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir entre 8 et 128 caractères.' });
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 1 majuscule et 1 chiffre.' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const db = getDatabase();
+
+    const rows = await db.query(
+      'SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ?',
+      [tokenHash]
+    );
+
+    const genericError = 'Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.';
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: genericError });
+    }
+
+    const resetToken = rows[0];
+
+    if (resetToken.used_at) {
+      return res.status(400).json({ error: genericError });
+    }
+
+    if (new Date(resetToken.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: genericError });
+    }
+
+    const users = await db.query('SELECT id, email FROM users WHERE id = ?', [resetToken.user_id]);
+    if (users.length === 0) {
+      return res.status(400).json({ error: genericError });
+    }
+    const user = users[0];
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+
+    await db.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, user.id]);
+
+    // Mark this token used, and invalidate any other outstanding tokens for this user
+    // (defense in depth — a stale, unused token from an earlier request should not remain valid)
+    await db.query(
+      'UPDATE password_reset_tokens SET used_at = ? WHERE id = ?',
+      [new Date(), resetToken.id]
+    );
+    await db.query(
+      'UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL AND id != ?',
+      [new Date(), user.id, resetToken.id]
+    );
+
+    logger.info(`Password reset completed for user ${user.id}`);
+
+    try {
+      await sendPasswordChangedEmail(user.email);
+    } catch (emailErr) {
+      logger.warn(`Password change email failed for ${user.email}: ${emailErr.message}`);
+    }
+
+    return res.json({ success: true, message: 'Votre mot de passe a été réinitialisé avec succès.' });
+  } catch (error) {
+    logger.error('Reset password error:', error);
+    return res.status(500).json({ error: 'Erreur lors de la réinitialisation du mot de passe.' });
+  }
+}
+
 module.exports = {
   register,
   login,
   me,
   refresh,
-  changePassword
+  changePassword,
+  forgotPassword,
+  resetPassword
 };

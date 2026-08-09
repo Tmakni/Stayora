@@ -5,10 +5,12 @@ import {
   Calendar,
   Zap,
   Plug,
-  Settings,
 } from 'lucide-react';
 
-// Primary navigation — shared by the desktop sidebar and mobile bottom nav.
+// Primary navigation — shared by the desktop sidebar and the mobile drawer.
+// « Paramètres » n'y figure volontairement pas : c'est un réglage de compte,
+// accessible depuis le menu de l'avatar (TopHeader), pas une destination de
+// travail quotidienne. La navigation reste ainsi centrée sur l'activité.
 export const NAV_ITEMS = [
   { to: '/', label: 'Accueil', icon: Home, end: true },
   { to: '/conversations', label: 'Conversations', icon: MessageSquare },
@@ -16,16 +18,20 @@ export const NAV_ITEMS = [
   { to: '/calendar', label: 'Calendrier', icon: Calendar },
   { to: '/automations', label: 'Automatisations', icon: Zap },
   { to: '/integrations', label: 'Intégrations', icon: Plug },
-  { to: '/settings', label: 'Paramètres', icon: Settings },
 ];
 
 // Mobile bottom nav keeps only the highest-frequency destinations (thumb-friendly).
+// Labels are deliberately SHORT: five tabs across a 360px screen leave ~72px
+// each, and a long word ("Automatisations") pushed the flex row wider than the
+// viewport — which is horizontal page scroll on the smallest phones.
+// « Intégrations » and « Paramètres » stay reachable from the drawer/avatar menu,
+// so every desktop destination is available on mobile too.
 export const MOBILE_NAV_ITEMS = [
   { to: '/', label: 'Accueil', icon: Home, end: true },
   { to: '/conversations', label: 'Messages', icon: MessageSquare },
   { to: '/properties', label: 'Logements', icon: Building2 },
-  { to: '/calendar', label: 'Calendrier', icon: Calendar },
-  { to: '/settings', label: 'Réglages', icon: Settings },
+  { to: '/calendar', label: 'Agenda', icon: Calendar },
+  { to: '/automations', label: 'Auto', icon: Zap },
 ];
 
 // booking_status is the one real, persisted status field on a conversation.

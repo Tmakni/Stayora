@@ -94,6 +94,10 @@
 
   html {
     -webkit-text-size-adjust: 100%;
+    /* Belt-and-braces against horizontal scroll: one overflowing child
+       anywhere in the tree must never make the whole page pan sideways.
+       Vertical scrolling and position:sticky are unaffected. */
+    overflow-x: hidden;
   }
 
   body {
@@ -101,6 +105,62 @@
     font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     font-feature-settings: 'cv11', 'ss01';
     text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    /* Stops the whole page rubber-banding behind the app shell on iOS when a
+       scrollable pane reaches its end. */
+    overscroll-behavior-y: none;
+  }
+
+  /* iOS zooms the page in when a focused input's font-size is under 16px.
+     The design uses 13-14px controls, so pin the *mobile* font size to 16px —
+     only under a coarse pointer, leaving the desktop typography untouched. */
+  @media (pointer: coarse) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  /* Touch-target floor. The design's compact 28-36px controls are right for a
+     mouse but below the ~44px comfortable-tap size on a phone, so they are
+     enlarged for coarse pointers only — the desktop layout is unchanged.
+     Applied via min-height/min-width so existing padding and alignment hold. */
+  @media (pointer: coarse) {
+    button:not([data-compact]),
+    [role='button']:not([data-compact]),
+    a[role='menuitem'],
+    [role='tab'],
+    select,
+    textarea,
+    /* Text fields too: the design's h-8/h-9 inputs (32/36px) are under the
+       comfortable tap size and awkward to focus accurately on a phone. */
+    input:not([type='checkbox']):not([type='radio']):not([type='hidden']) {
+      min-height: 44px;
+    }
+
+    button:not([data-compact]):where(.size-7, .size-9, [class*='icon']),
+    [role='button']:not([data-compact]):where(.size-7, .size-9) {
+      min-width: 44px;
+    }
+
+    /* Radix menu/select items are divs, not buttons. */
+    [role='menuitem'],
+    [role='option'] {
+      min-height: 44px;
+    }
+  }
+
+  /* Respect users who ask for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   /* Comfortable, accessible focus ring everywhere */
@@ -132,15 +192,26 @@
 }
 
 @layer utilities {
-  /* iOS safe-area helpers used by the mobile bottom nav & sticky composer */
+  /* iOS safe-area helpers used by the mobile bottom nav & sticky composer.
+     The max(…, 0px) form keeps the value sane on browsers that report nothing. */
   .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
   }
   .pt-safe {
-    padding-top: env(safe-area-inset-top);
+    padding-top: max(env(safe-area-inset-top), 0px);
   }
   .h-safe-bottom {
     height: env(safe-area-inset-bottom);
+  }
+  /* Left/right insets matter in landscape on notched iPhones, where the
+     display cutout eats into one side of the viewport. */
+  .px-safe {
+    padding-left: max(env(safe-area-inset-left), 0px);
+    padding-right: max(env(safe-area-inset-right), 0px);
+  }
+  /* Bottom padding that clears BOTH the mobile tab bar and the home indicator. */
+  .pb-nav-safe {
+    padding-bottom: calc(3.5rem + max(env(safe-area-inset-bottom), 0px));
   }
 
   .no-scrollbar::-webkit-scrollbar {

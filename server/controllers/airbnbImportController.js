@@ -1,4 +1,14 @@
 const logger = require('../utils/logger');
+const {
+  validateAirbnbUrl,
+  safeFetch,
+  extractListingId,
+  resolveShortLink,
+  resolveListingTitle,
+  isValidListingName,
+  isPlaceholderName,
+  cleanListingTitle,
+} = require('../services/airbnbListingResolver');
 
 const AIRBNB_API_KEY = 'd306zoyjsyarp7ifhu67rjxn52tv0t20';
 const AIRBNB_API_KEY_V3 = 'd306zoyjsyarp7ifhu67rjxn52tv0t20';
@@ -49,21 +59,9 @@ async function fetchViaAirbnbApi(listingId) {
   return null;
 }
 
-/**
- * Extracts listing ID from any Airbnb URL format:
- * - https://www.airbnb.com/rooms/12345678
- * - https://airbnb.fr/rooms/12345678?...
- * - https://fr.airbnb.com/rooms/12345678
- * - plain number "12345678"
- */
-function extractListingId(input) {
-  if (!input) return null;
-  // If it's just a number
-  if (/^\d+$/.test(input.trim())) return input.trim();
-  // Extract from URL
-  const match = input.match(/\/rooms?\/(\d+)/i);
-  return match ? match[1] : null;
-}
+// extractListingId now lives in services/airbnbListingResolver.js alongside the
+// URL allowlist, so id parsing and host validation cannot drift apart. It also
+// understands /rooms/plus/<id>, ?listing_id=, and /h/<slug>-<id> links.
 
 /**
  * Map Airbnb amenity names/categories to our boolean fields
@@ -341,7 +339,11 @@ function parseListing(data, listingId) {
 
   return {
     airbnb_listing_id: listingId,
-    name: get('name', 'listing_name', 'listingName') || `Logement Airbnb #${listingId}`,
+    // Empty, never a synthesized "Logement Airbnb #<id>": an absent name must
+    // stay absent so the title resolver can look elsewhere and, failing that,
+    // ask the user. Manufacturing a placeholder here is what made it look like
+    // a real value all the way down to the INSERT.
+    name: get('name', 'listing_name', 'listingName') || '',
     property_type,
     bedrooms:   Math.max(0, parseInt(get('bedrooms', 'bedroom_count', 'bedroomCount') || 1, 10)),
     beds:       Math.max(1, parseInt(get('beds', 'bed_count', 'bedCount') || 1, 10)),
@@ -522,7 +524,9 @@ function parseMetaTags(html, listingId) {
     return m ? m[1] : '';
   };
 
-  const title = og('title') || og('site_name') || metaName('title') || `Logement Airbnb #${listingId}`;
+  // NOT og:site_name — on every Airbnb page that meta is the literal string
+  // "Airbnb", so including it here produced listings actually named "Airbnb".
+  const title = og('title') || metaName('title') || '';
   const desc = og('description') || metaName('description') || '';
 
   // Try to extract counts from description like "2 guests · 1 bedroom · 1 bed · 1 bath"
@@ -556,7 +560,9 @@ function parseMetaTags(html, listingId) {
 
   return {
     airbnb_listing_id: listingId,
-    name: title.replace(/ - Airbnb$/, '').replace(/ \| Airbnb$/, '').trim() || `Logement #${listingId}`,
+    // Suffix stripping is handled centrally by cleanListingTitle(); leaving it
+    // empty here lets the resolver decide, rather than inventing "Logement #<id>".
+    name: cleanListingTitle(title) || '',
     property_type,
     bedrooms, beds, bathrooms, max_guests: maxGuests,
     description: desc,
@@ -586,7 +592,31 @@ async function importAirbnbListing(req, res) {
     return res.status(400).json({ error: 'URL ou identifiant Airbnb requis' });
   }
 
-  const listingId = extractListingId(url);
+  // Reject anything that is not an Airbnb link before touching the network.
+  // A bare numeric id stays valid (it never becomes a request to a foreign host).
+  const looksLikeBareId = /^\d{4,}$/.test(String(url).trim());
+  if (!looksLikeBareId) {
+    const urlCheck = validateAirbnbUrl(url);
+    if (!urlCheck.valid) {
+      return res.status(400).json({ error: `Lien Airbnb invalide : ${urlCheck.reason}` });
+    }
+  }
+
+  let listingId = extractListingId(url);
+
+  // Short links (abnb.me/…, airbnb.app.link/…) carry no id — resolve them.
+  if (!listingId && !looksLikeBareId) {
+    try {
+      const resolved = await resolveShortLink(url);
+      if (resolved) {
+        listingId = resolved.listingId;
+        logger.info(`Airbnb short link resolved to listing ${listingId}`);
+      }
+    } catch (err) {
+      logger.warn(`Short link resolution failed: ${err.message}`);
+    }
+  }
+
   if (!listingId) {
     return res.status(400).json({
       error: 'URL invalide. Format attendu : https://www.airbnb.com/rooms/12345678'
@@ -595,58 +625,56 @@ async function importAirbnbListing(req, res) {
 
   logger.info(`Airbnb import attempt for listing ID: ${listingId}`);
 
+  // Best parse so far. The API branch used to return immediately only when the
+  // name was usable and otherwise threw the whole result away; now the data is
+  // kept as a fallback while the HTML path tries to recover a real title.
+  let bestParsed = null;
+  let bestPhotos = [];
+
   // Strategy 0: Try Airbnb internal API (structured JSON, most reliable)
   try {
     const apiData = await fetchViaAirbnbApi(listingId);
     if (apiData) {
       const parsed = parseListing(apiData, listingId);
-      if (parsed && parsed.name && !parsed.name.includes('#' + listingId)) {
+      if (parsed) {
         parsed._source = 'airbnb_api';
         parsed._confidence = 'high';
-        logger.info(`Airbnb import success via API for ${listingId}`);
-        const apiPhotos = extractPhotos(apiData, '');
-        return res.json({ success: true, data: parsed, listing_id: listingId, photos: apiPhotos });
+        bestParsed = parsed;
+        bestPhotos = extractPhotos(apiData, '');
+        if (isValidListingName(parsed.name, listingId)) {
+          logger.info(`Airbnb import success via API for ${listingId}`);
+          return sendImportResult(res, { parsed, listingId, photos: bestPhotos, html: '' });
+        }
+        logger.info(`Airbnb API returned data for ${listingId} but no usable name — trying HTML`);
       }
     }
   } catch (apiErr) {
     logger.warn(`Airbnb API strategy failed: ${apiErr.message}`);
   }
 
-  // Try fetching the Airbnb listing page
+  // Try fetching the Airbnb listing page.
+  // safeFetch pins the request to the Airbnb host allowlist, validates every
+  // redirect hop, and caps both duration and response size.
   const targetUrl = `https://www.airbnb.com/rooms/${listingId}?check_in=2026-06-01&check_out=2026-06-05&adults=2`;
   let html = '';
   let fetchOk = false;
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+  const pageResult = await safeFetch(targetUrl, {
+    headers: {
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Cache-Control': 'no-cache',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Upgrade-Insecure-Requests': '1',
+    },
+  });
 
-    const response = await fetch(targetUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Upgrade-Insecure-Requests': '1',
-        'Connection': 'keep-alive'
-      },
-      redirect: 'follow'
-    });
-
-    clearTimeout(timeout);
-
-    if (response.ok || response.status === 200) {
-      html = await response.text();
-      fetchOk = html.length > 1000;
-    }
-  } catch (fetchErr) {
-    logger.warn(`Airbnb fetch failed for ${listingId}: ${fetchErr.message}`);
+  if (pageResult.ok) {
+    html = pageResult.body;
+    fetchOk = html.length > 1000;
+  } else {
+    logger.warn(`Airbnb fetch failed for ${listingId}: ${pageResult.reason}`);
   }
 
   // Strategy 1: Parse __NEXT_DATA__ JSON blob
@@ -658,9 +686,20 @@ async function importAirbnbListing(req, res) {
         const nextData = JSON.parse(match[1]);
         const parsed = parseListing(nextData, listingId);
         if (parsed) {
+          // This branch previously returned on `if (parsed)` alone, with no name
+          // check at all — that is how "Logement Airbnb #<id>" reached the DB
+          // whenever the blob parsed but carried no title. sendImportResult now
+          // re-derives the name from the page and refuses placeholders.
           logger.info(`Airbnb import success via __NEXT_DATA__ for ${listingId}`);
           const ndPhotos = extractPhotos(nextData, html);
-          return res.json({ success: true, data: parsed, listing_id: listingId, photos: ndPhotos });
+          if (!bestParsed || isValidListingName(parsed.name, listingId)) {
+            bestParsed = parsed;
+            bestPhotos = ndPhotos.length ? ndPhotos : bestPhotos;
+          }
+          const titled = resolveListingTitle({ html, listingId, parsedName: parsed.name });
+          if (titled.name) {
+            return sendImportResult(res, { parsed, listingId, photos: ndPhotos, html });
+          }
         }
       } catch (parseErr) {
         logger.warn(`__NEXT_DATA__ parse error: ${parseErr.message}`);
@@ -673,58 +712,117 @@ async function importAirbnbListing(req, res) {
       try {
         const d = JSON.parse(blob);
         const parsed = parseListing(d, listingId);
-        if (parsed && parsed.name && !parsed.name.includes('#' + listingId)) {
+        if (parsed && isValidListingName(parsed.name, listingId)) {
           logger.info(`Airbnb import success via JSON blob for ${listingId}`);
           const blobPhotos = extractPhotos(d, html);
-          return res.json({ success: true, data: parsed, listing_id: listingId, photos: blobPhotos });
+          return sendImportResult(res, { parsed, listingId, photos: blobPhotos, html });
         }
       } catch (_) {}
     }
 
     // Strategy 2b: Try data-deferred-state / data-state scripts (newer Airbnb)
     const deferredParsed = parseDeferredState(html, listingId);
-    if (deferredParsed && deferredParsed.name && !deferredParsed.name.includes('#' + listingId)) {
+    if (deferredParsed && isValidListingName(deferredParsed.name, listingId)) {
       logger.info(`Airbnb import success via deferred-state for ${listingId}`);
       const defPhotos = extractPhotos({}, html);
-      return res.json({ success: true, data: deferredParsed, listing_id: listingId, photos: defPhotos });
+      return sendImportResult(res, { parsed: deferredParsed, listingId, photos: defPhotos, html });
     }
 
     // Strategy 2c: Try JSON-LD Schema.org structured data
     const jsonLdParsed = parseJsonLd(html, listingId);
-    if (jsonLdParsed && jsonLdParsed.name && !jsonLdParsed.name.includes('#' + listingId)) {
+    if (jsonLdParsed && isValidListingName(jsonLdParsed.name, listingId)) {
       logger.info(`Airbnb import success via JSON-LD for ${listingId}`);
       const ldPhotos = extractPhotos({}, html);
-      return res.json({ success: true, data: jsonLdParsed, listing_id: listingId, photos: ldPhotos });
+      return sendImportResult(res, { parsed: jsonLdParsed, listingId, photos: ldPhotos, html });
     }
 
     // Strategy 3: Meta tags fallback (enriched — extracts counts from description)
     const metaParsed = parseMetaTags(html, listingId);
-    if (metaParsed.name && !metaParsed.name.includes('#' + listingId)) {
-      logger.info(`Airbnb import via meta tags for ${listingId}`);
+    if (metaParsed) {
       const metaPhotos = extractPhotos({}, html);
-      return res.json({ success: true, data: metaParsed, listing_id: listingId, photos: metaPhotos });
+      if (!bestParsed) {
+        bestParsed = metaParsed;
+        if (metaPhotos.length) bestPhotos = metaPhotos;
+      }
+      // Only ship it if a real title can be resolved from the page; the old
+      // check let `og:site_name` ("Airbnb") through as the listing name.
+      const titled = resolveListingTitle({ html, listingId, parsedName: metaParsed.name });
+      if (titled.name) {
+        logger.info(`Airbnb import via meta tags for ${listingId}`);
+        return sendImportResult(res, { parsed: metaParsed, listingId, photos: metaPhotos, html });
+      }
     }
   }
 
-  // Strategy 4: Return minimal stub so the user can continue manually
-  logger.warn(`Airbnb import could not extract data for listing ${listingId}, returning stub`);
+  // Strategy 4: nothing usable. Ship whatever structured data we did gather
+  // (the API branch often has everything except a title) and let
+  // sendImportResult flag the name for confirmation.
+  logger.warn(`Airbnb import could not resolve a title for listing ${listingId}`);
+
+  const fallbackParsed = bestParsed || {
+    airbnb_listing_id: listingId,
+    name: '',
+    property_type: 'apartment',
+    bedrooms: 1, beds: 1, bathrooms: 1, max_guests: 2,
+    description: '', address: '', house_rules: '',
+    has_wifi: true, has_kitchen: false, has_parking: false, has_pool: false,
+    has_gym: false, has_tv: false, has_washing_machine: false, has_air_conditioning: false,
+    has_heating: true, has_workspace: false, has_hair_dryer: false, has_iron: false,
+    allows_pets: false, allows_smoking: false, allows_events: false,
+    _source: 'stub',
+    _confidence: 'none'
+  };
+
+  return sendImportResult(res, {
+    parsed: fallbackParsed,
+    listingId,
+    photos: bestPhotos,
+    html,
+    warning: "Airbnb n'a pas laissé récupérer le nom de l'annonce. Vérifiez ou saisissez-le avant de créer le logement.",
+  });
+}
+
+/**
+ * Single exit point for every import strategy.
+ *
+ * Re-derives the listing name from the page (JSON-LD → Open Graph → <title> →
+ * data already parsed) and refuses to emit a placeholder. When no reliable name
+ * exists the payload carries `needs_name_confirmation: true` and an empty
+ * `name`, which the client turns into a required, pre-filled field — nothing is
+ * ever silently saved as "Logement Airbnb #<id>".
+ */
+function sendImportResult(res, { parsed, listingId, photos = [], html = '', scanName = null, warning = null }) {
+  const data = { ...parsed };
+
+  const titled = resolveListingTitle({
+    html,
+    listingId,
+    parsedName: data.name,
+    scanName,
+  });
+
+  if (titled.name) {
+    data.name = titled.name;
+    data._name_source = titled.source;
+    data._name_confirmed = false;
+  } else {
+    // Never hand the client a name it might save verbatim.
+    data.name = '';
+    data._name_source = 'none';
+  }
+
+  const needsConfirmation = !titled.name;
+
   return res.json({
     success: true,
-    data: {
-      airbnb_listing_id: listingId,
-      name: `Logement Airbnb #${listingId}`,
-      property_type: 'apartment',
-      bedrooms: 1, beds: 1, bathrooms: 1, max_guests: 2,
-      description: '', address: '', house_rules: '',
-      has_wifi: true, has_kitchen: false, has_parking: false, has_pool: false,
-      has_gym: false, has_tv: false, has_washing_machine: false, has_air_conditioning: false,
-      has_heating: true, has_workspace: false, has_hair_dryer: false, has_iron: false,
-      allows_pets: false, allows_smoking: false, allows_events: false,
-      _source: 'stub',
-      _confidence: 'none'
-    },
+    data,
     listing_id: listingId,
-    warning: "Les données n'ont pas pu être récupérées automatiquement. Veuillez compléter les informations manuellement."
+    photos,
+    needs_name_confirmation: needsConfirmation,
+    suggested_name: titled.name || '',
+    ...(warning || needsConfirmation
+      ? { warning: warning || "Le nom de l'annonce n'a pas pu être récupéré. Merci de le saisir." }
+      : {}),
   });
 }
 
@@ -744,26 +842,25 @@ async function scanAirbnbProfile(req, res) {
   if (/^\d+$/.test(url)) url = `https://www.airbnb.com/users/show/${url}`;
   if (!url.startsWith('http')) url = 'https://' + url;
 
+  // SSRF protection. The previous check only blocked private/internal hosts,
+  // so ANY public URL was fetchable through this authenticated endpoint —
+  // effectively a request proxy. Now the host must be Airbnb, every redirect
+  // hop is re-validated, and the response is bounded in time and size.
+  const urlCheck = validateAirbnbUrl(url);
+  if (!urlCheck.valid) {
+    return res.status(400).json({ error: `URL invalide: ${urlCheck.reason}` });
+  }
+  url = urlCheck.url;
+
   logger.info(`Airbnb profile scan: ${url}`);
 
-  let html = '';
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
-        'Cache-Control': 'no-cache',
-      },
-      redirect: 'follow'
-    });
-    clearTimeout(timeout);
-    if (response.ok) html = await response.text();
-  } catch (err) {
-    logger.warn(`Profile scan fetch error: ${err.message}`);
+  const scanResult = await safeFetch(url, {
+    timeoutMs: 15000,
+    headers: { 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8', 'Cache-Control': 'no-cache' },
+  });
+  const html = scanResult.ok ? scanResult.body : '';
+  if (!scanResult.ok) {
+    logger.warn(`Profile scan fetch error: ${scanResult.reason}`);
   }
 
   if (!html || html.length < 500) {
@@ -927,6 +1024,17 @@ async function confirmImport(req, res) {
 
   if (!name) return res.status(400).json({ error: 'Le nom du logement est requis.' });
 
+  // Server-side guard: even if an old client (or a direct API call) sends the
+  // legacy placeholder, it must never reach the database. This is the last line
+  // of defence behind the resolver — clients can be stale, the DB cannot.
+  const cleanName = String(name).trim();
+  if (isPlaceholderName(cleanName, airbnb_listing_id)) {
+    return res.status(400).json({
+      error: "Merci de saisir le vrai nom de l'annonce (le nom automatique n'est pas accepté).",
+      needs_name_confirmation: true,
+    });
+  }
+
   // ── Anti-doublon ────────────────────────────────────────────────────────
   if (airbnb_listing_id) {
     const existing = await db.query(
@@ -977,7 +1085,7 @@ async function confirmImport(req, res) {
          ?, ?)`,
       [
         userId, 'airbnb', source_url || null, airbnb_listing_id || null,
-        name, property_type || 'apartment',
+        cleanName, property_type || 'apartment',
         parseInt(bedrooms) || 1, parseInt(beds) || 1,
         parseFloat(bathrooms) || 1, parseInt(max_guests) || 2,
         address || '', description || '', house_rules || '',
@@ -1004,6 +1112,16 @@ async function confirmImport(req, res) {
     );
 
     const propertyId = result.insertId;
+
+    // Record where the name came from. A re-scan may later correct an
+    // automatically-extracted name, but must never overwrite one the user typed
+    // or confirmed themselves (see updateFromAirbnb). Written separately rather
+    // than threaded through the 50-placeholder INSERT above.
+    const nameSource = body.name_confirmed_by_user ? 'manual' : 'airbnb_auto';
+    await db.query(
+      'UPDATE property_profiles SET name_source = ? WHERE id = ? AND user_id = ?',
+      [nameSource, propertyId, userId]
+    );
 
     // ── Insérer les photos ────────────────────────────────────────────────
     if (photos.length > 0) {
@@ -1052,34 +1170,70 @@ async function updateFromAirbnb(req, res) {
 
   // Ownership check
   const props = await db.query(
-    'SELECT id, airbnb_listing_id FROM property_profiles WHERE id = ? AND user_id = ?',
+    'SELECT id, name, name_source, airbnb_listing_id FROM property_profiles WHERE id = ? AND user_id = ?',
     [propertyId, userId]
   );
   if (!props.length) return res.status(403).json({ error: 'Accès refusé ou logement introuvable.' });
 
-  const listingId = props[0].airbnb_listing_id;
+  const current = props[0];
+  const listingId = current.airbnb_listing_id;
   if (!listingId) return res.status(400).json({ error: "Ce logement n'a pas d'identifiant Airbnb." });
 
-  // Re-fetch
+  // Re-fetch: API first, then the public page — the page is what carries
+  // JSON-LD/OG/<title>, which is where a real name usually comes from when the
+  // API answer has none.
   let parsed = null;
   try {
     const apiData = await fetchViaAirbnbApi(listingId);
     if (apiData) parsed = parseListing(apiData, listingId);
   } catch (_) {}
 
+  let html = '';
+  const pageResult = await safeFetch(`https://www.airbnb.com/rooms/${listingId}`, {
+    headers: { 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8' },
+  });
+  if (pageResult.ok) html = pageResult.body;
+
+  if (!parsed && html) {
+    parsed = parseJsonLd(html, listingId) || parseDeferredState(html, listingId) || parseMetaTags(html, listingId);
+  }
+
   if (!parsed) return res.status(502).json({ error: "Impossible de récupérer les données Airbnb. Réessayez plus tard." });
+
+  // ── Name handling ────────────────────────────────────────────────────────
+  // A name the user typed or confirmed is theirs — a re-scan never overwrites
+  // it. Anything auto-generated (including the legacy "Logement Airbnb #<id>"
+  // placeholder still sitting in older rows) IS corrected when a real title can
+  // be resolved. Nothing here creates a row, so re-scanning cannot duplicate.
+  const titled = resolveListingTitle({ html, listingId, parsedName: parsed.name });
+  const userOwnsName = current.name_source === 'manual';
+  const currentIsPlaceholder = isPlaceholderName(current.name, listingId);
+
+  let nextName = current.name;
+  let nameUpdated = false;
+  if (!userOwnsName && titled.name && titled.name !== current.name) {
+    nextName = titled.name;
+    nameUpdated = true;
+  } else if (userOwnsName && currentIsPlaceholder && titled.name) {
+    // Edge case: flagged manual but still holding the placeholder (e.g. saved
+    // before this fix). A placeholder is not a name worth protecting.
+    nextName = titled.name;
+    nameUpdated = true;
+  }
 
   try {
     await db.query(
       `UPDATE property_profiles SET
-        name=?, description=?, house_rules=?, address=?,
+        name=?, name_source=?, description=?, house_rules=?, address=?,
         bedrooms=?, beds=?, bathrooms=?, max_guests=?,
         has_wifi=?, has_kitchen=?, has_parking=?, has_pool=?,
         has_air_conditioning=?, has_heating=?, has_tv=?,
         check_in_time=?, check_out_time=?
        WHERE id = ? AND user_id = ?`,
       [
-        parsed.name, parsed.description, parsed.house_rules, parsed.address,
+        nextName,
+        nameUpdated ? 'airbnb_auto' : (current.name_source || 'airbnb_auto'),
+        parsed.description, parsed.house_rules, parsed.address,
         parsed.bedrooms, parsed.beds, parsed.bathrooms, parsed.max_guests,
         parsed.has_wifi ? 1 : 0, parsed.has_kitchen ? 1 : 0,
         parsed.has_parking ? 1 : 0, parsed.has_pool ? 1 : 0,
@@ -1089,8 +1243,19 @@ async function updateFromAirbnb(req, res) {
         propertyId, userId,
       ]
     );
-    logger.info(`Property ${propertyId} updated from Airbnb`);
-    return res.json({ success: true, message: 'Logement mis à jour depuis Airbnb.' });
+    logger.info(
+      `Property ${propertyId} updated from Airbnb` +
+      (nameUpdated ? ` (name corrected: "${current.name}" → "${nextName}")` : '')
+    );
+    return res.json({
+      success: true,
+      message: nameUpdated
+        ? `Logement mis à jour. Nom corrigé : « ${nextName} ».`
+        : 'Logement mis à jour depuis Airbnb.',
+      name: nextName,
+      name_updated: nameUpdated,
+      name_locked: userOwnsName && !nameUpdated,
+    });
   } catch (err) {
     logger.error('updateFromAirbnb error:', err.message);
     return res.status(500).json({ error: 'Erreur lors de la mise à jour.' });
@@ -1104,23 +1269,28 @@ async function updateFromAirbnb(req, res) {
  * Returns photos for a property (ownership enforced).
  */
 async function getPropertyPhotos(req, res) {
-  const { getDatabase } = require('../config/db');
-  const db = getDatabase();
-  const userId = req.userId;
-  const propertyId = parseInt(req.params.id, 10);
+  try {
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const userId = req.userId;
+    const propertyId = parseInt(req.params.id, 10);
 
-  // Ownership check
-  const props = await db.query(
-    'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
-    [propertyId, userId]
-  );
-  if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
+    // Ownership check
+    const props = await db.query(
+      'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, userId]
+    );
+    if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
 
-  const photos = await db.query(
-    'SELECT * FROM property_photos WHERE property_id = ? AND user_id = ? ORDER BY position ASC',
-    [propertyId, userId]
-  );
-  return res.json({ photos });
+    const photos = await db.query(
+      'SELECT * FROM property_photos WHERE property_id = ? AND user_id = ? ORDER BY position ASC',
+      [propertyId, userId]
+    );
+    return res.json({ photos });
+  } catch (err) {
+    logger.error('Get property photos error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors du chargement des photos.' });
+  }
 }
 
 /**
@@ -1128,18 +1298,46 @@ async function getPropertyPhotos(req, res) {
  * Deletes a photo (ownership enforced on both property and photo).
  */
 async function deletePropertyPhoto(req, res) {
-  const { getDatabase } = require('../config/db');
-  const db = getDatabase();
-  const userId = req.userId;
-  const propertyId = parseInt(req.params.id, 10);
-  const photoId = parseInt(req.params.photoId, 10);
+  try {
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const userId = req.userId;
+    const propertyId = parseInt(req.params.id, 10);
+    const photoId = parseInt(req.params.photoId, 10);
 
-  const result = await db.query(
-    'DELETE FROM property_photos WHERE id = ? AND property_id = ? AND user_id = ?',
-    [photoId, propertyId, userId]
-  );
-  if (!result.affectedRows) return res.status(404).json({ error: 'Photo introuvable.' });
-  return res.json({ success: true });
+    const result = await db.query(
+      'DELETE FROM property_photos WHERE id = ? AND property_id = ? AND user_id = ?',
+      [photoId, propertyId, userId]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Photo introuvable.' });
+
+    // La vignette du logement (property_profiles.main_photo_url) est un
+    // raccourci dénormalisé : si on vient de supprimer la photo qu'elle
+    // désignait, elle pointerait vers une image inexistante. On la recale sur
+    // une photo encore présente, ou on la vide s'il n'en reste aucune.
+    const remaining = await db.query(
+      'SELECT image_url FROM property_photos WHERE property_id = ? AND user_id = ? ORDER BY is_main DESC, position ASC',
+      [propertyId, userId]
+    );
+    const stillValid = remaining.map((p) => p.image_url);
+    const current = await db.query(
+      'SELECT main_photo_url FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, userId]
+    );
+    const currentUrl = current[0]?.main_photo_url || null;
+
+    if (currentUrl && !stillValid.includes(currentUrl)) {
+      await db.query(
+        'UPDATE property_profiles SET main_photo_url = ? WHERE id = ? AND user_id = ?',
+        [stillValid[0] || null, propertyId, userId]
+      );
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('Delete property photo error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de la suppression de la photo.' });
+  }
 }
 
 /**
@@ -1147,36 +1345,46 @@ async function deletePropertyPhoto(req, res) {
  * Sets a photo as the main photo for a property.
  */
 async function setMainPhoto(req, res) {
-  const { getDatabase } = require('../config/db');
-  const db = getDatabase();
-  const userId = req.userId;
-  const propertyId = parseInt(req.params.id, 10);
-  const photoId = parseInt(req.params.photoId, 10);
+  try {
+    const { getDatabase } = require('../config/db');
+    const db = getDatabase();
+    const userId = req.userId;
+    const propertyId = parseInt(req.params.id, 10);
+    const photoId = parseInt(req.params.photoId, 10);
 
-  // Ownership check
-  const props = await db.query(
-    'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
-    [propertyId, userId]
-  );
-  if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
+    // Ownership check
+    const props = await db.query(
+      'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, userId]
+    );
+    if (!props.length) return res.status(403).json({ error: 'Accès refusé.' });
 
-  // Unset all, then set selected
-  await db.query('UPDATE property_photos SET is_main = 0 WHERE property_id = ? AND user_id = ?', [propertyId, userId]);
-  const r = await db.query(
-    'UPDATE property_photos SET is_main = 1 WHERE id = ? AND property_id = ? AND user_id = ?',
-    [photoId, propertyId, userId]
-  );
-  if (!r.affectedRows) return res.status(404).json({ error: 'Photo introuvable.' });
+    // Vérifier que la photo appartient bien à ce logement AVANT de toucher
+    // aux drapeaux : sinon un id invalide effaçait la photo principale
+    // existante sans jamais en désigner une nouvelle.
+    const target = await db.query(
+      'SELECT image_url FROM property_photos WHERE id = ? AND property_id = ? AND user_id = ?',
+      [photoId, propertyId, userId]
+    );
+    if (!target.length) return res.status(404).json({ error: 'Photo introuvable.' });
 
-  // Update main_photo_url on the property
-  const photo = await db.query('SELECT image_url FROM property_photos WHERE id = ?', [photoId]);
-  if (photo.length) {
+    // Unset all, then set selected
+    await db.query('UPDATE property_photos SET is_main = 0 WHERE property_id = ? AND user_id = ?', [propertyId, userId]);
+    await db.query(
+      'UPDATE property_photos SET is_main = 1 WHERE id = ? AND property_id = ? AND user_id = ?',
+      [photoId, propertyId, userId]
+    );
+
     await db.query(
       'UPDATE property_profiles SET main_photo_url = ? WHERE id = ? AND user_id = ?',
-      [photo[0].image_url, propertyId, userId]
+      [target[0].image_url, propertyId, userId]
     );
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('Set main photo error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de la mise à jour de la photo principale.' });
   }
-  return res.json({ success: true });
 }
 
 module.exports = {

@@ -1,4 +1,5 @@
 // Templates fallback si OpenAI échoue
+const logger = require('../utils/logger');
 
 const TEMPLATES = {
   'check-in': {
@@ -72,11 +73,21 @@ function generateFromTemplate(intent, propertyContext, incomingMessage) {
   const lang = detectLanguage(incomingMessage);
   
   let template = TEMPLATES[intent]?.[lang] || TEMPLATES.other[lang];
-  
-  const context = typeof propertyContext === 'string' 
-    ? JSON.parse(propertyContext) 
-    : propertyContext;
-  
+
+  // propertyContext is normally already a parsed object (every caller pre-parses
+  // context_json in a try/catch), but stay defensive: a malformed/non-JSON string
+  // must never crash the process.
+  let context = propertyContext;
+  if (typeof propertyContext === 'string') {
+    try {
+      context = JSON.parse(propertyContext);
+    } catch (err) {
+      logger.warn('templateService: failed to parse propertyContext JSON, using empty context:', err.message);
+      context = {};
+    }
+  }
+  context = context || {};
+
   // Replace placeholders
   template = template.replace(/{check_in_time}/g, context.check_in_time || '15:00');
   template = template.replace(/{check_out_time}/g, context.check_out_time || '11:00');

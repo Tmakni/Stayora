@@ -157,6 +157,13 @@ async function getReservations(req, res) {
     const db = getDatabase();
     const { status, property_id } = req.query;
 
+    // Pagination optionnelle (rétrocompatible), mêmes bornes que
+    // conversationController.getConversations. Non envoyée par le client
+    // aujourd'hui, donc par défaut on renvoie jusqu'à `limit` réservations
+    // sans changer la forme de la réponse ({ reservations: [...] }).
+    const limit = Math.min(parseInt(req.query.limit) || 100, 200);
+    const offset = parseInt(req.query.offset) || 0;
+
     let query = 'SELECT * FROM reservations WHERE user_id = ?';
     const params = [req.userId];
 
@@ -169,7 +176,8 @@ async function getReservations(req, res) {
       params.push(parseInt(property_id));
     }
 
-    query += ' ORDER BY check_in_date DESC';
+    query += ' ORDER BY check_in_date DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
 
     const reservations = await db.query(query, params);
 

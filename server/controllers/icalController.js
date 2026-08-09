@@ -94,7 +94,7 @@ async function getCalendar(req, res) {
     });
   } catch (err) {
     logger.error('Get calendar error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Erreur lors du chargement du calendrier.' });
   }
 }
 
@@ -164,7 +164,7 @@ async function checkAvailability(req, res) {
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('Check availability error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Erreur lors de la vérification des disponibilités.' });
   }
 }
 

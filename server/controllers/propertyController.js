@@ -1,5 +1,27 @@
 const { getDatabase } = require('../config/db');
 const logger = require('../utils/logger');
+const { isPlaceholderName } = require('../services/airbnbListingResolver');
+
+/**
+ * Does this DB error mean "a row with these unique values already exists"?
+ * Covers SQLite (SQLITE_CONSTRAINT_UNIQUE) and MySQL (ER_DUP_ENTRY / 1062).
+ *
+ * Needed because the SELECT-then-INSERT duplicate check is a TOCTOU race: two
+ * simultaneous imports of the same listing both see "not present" and both
+ * insert. Migration 016 makes the database the authority; this turns the
+ * resulting constraint error back into the same friendly 409 the pre-check
+ * returns, instead of a 500.
+ */
+function isUniqueViolation(err) {
+  const message = String(err && err.message || '');
+  return (
+    err?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    err?.code === 'SQLITE_CONSTRAINT' ||
+    err?.code === 'ER_DUP_ENTRY' ||
+    err?.errno === 1062 ||
+    /UNIQUE constraint failed|Duplicate entry/i.test(message)
+  );
+}
 
 // Champs stockés uniquement dans context_json (pas de colonnes DB)
 const CONTEXT_ONLY_FIELDS = [
@@ -422,6 +444,17 @@ async function createProperty(req, res) {
       });
     }
 
+    // Refuse the auto-generated placeholder names ("Logement Airbnb #<id>",
+    // a bare listing id, the literal "Airbnb"). This is the endpoint the import
+    // flow actually saves through, so it is where the guarantee has to hold —
+    // a stale client must not be able to persist a placeholder.
+    if (isPlaceholderName(name, airbnb_listing_id)) {
+      return res.status(400).json({
+        error: "Merci de saisir le vrai nom du logement (un nom automatique n'est pas accepté).",
+        needs_name_confirmation: true,
+      });
+    }
+
     // Anti-doublon Airbnb : même user, même listing_id
     if (airbnb_listing_id) {
       const existing = await db.query(
@@ -468,7 +501,7 @@ async function createProperty(req, res) {
         allows_pets, allows_smoking, allows_events,
         address, description, house_rules, auto_reply_enabled, reply_tone, context_json,
         source, source_url, airbnb_listing_id, city, country, main_photo_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     // Determine main photo URL for quick display
@@ -491,6 +524,17 @@ async function createProperty(req, res) {
       airbnb_listing_id ? String(airbnb_listing_id) : null,
       city || null, country || null, mainPhotoUrl
     ]);
+
+    // Record whether this name is the user's or came from the import.
+    // Only a name the user typed/confirmed is protected from a later re-scan
+    // (see airbnbImportController.updateFromAirbnb).
+    if (result.insertId) {
+      const nameSource = (req.body.name_confirmed_by_user || !airbnb_listing_id) ? 'manual' : 'airbnb_auto';
+      await db.query(
+        'UPDATE property_profiles SET name_source = ? WHERE id = ? AND user_id = ?',
+        [nameSource, result.insertId, userId]
+      );
+    }
 
     // Save imported photos
     if (Array.isArray(photos) && photos.length > 0 && result.insertId) {
@@ -528,6 +572,26 @@ async function createProperty(req, res) {
       }
     });
   } catch (error) {
+    // Lost the race against a simultaneous import of the same listing — the
+    // unique index (migration 016) rejected the second insert. Report the same
+    // "already exists" outcome the pre-check would have given, pointing at the
+    // row that did win, rather than a 500.
+    if (isUniqueViolation(error)) {
+      try {
+        const existing = await getDatabase().query(
+          'SELECT id FROM property_profiles WHERE user_id = ? AND airbnb_listing_id = ? LIMIT 1',
+          [req.userId, String(req.body?.airbnb_listing_id || '')]
+        );
+        logger.info(`Concurrent import of listing ${req.body?.airbnb_listing_id} for user ${req.userId} — kept existing property`);
+        return res.status(409).json({
+          alreadyExists: true,
+          existingId: existing[0]?.id,
+          message: 'Ce logement Airbnb existe déjà sur votre compte.',
+        });
+      } catch (_) {
+        // fall through to the generic error below
+      }
+    }
     logger.error('Error creating property:', error);
     res.status(500).json({ error: 'Erreur lors de la création de la propriété' });
   }
@@ -540,6 +604,15 @@ async function getProperties(req, res) {
   try {
     const userId = req.userId;
     const db = getDatabase();
+
+    // Pagination optionnelle (rétrocompatible) : mêmes bornes que
+    // conversationController.getConversations. Le client n'envoie
+    // actuellement pas ces paramètres, donc par défaut on renvoie
+    // jusqu'à `limit` (largement au-dessus du nombre de logements
+    // réel d'un hôte) plutôt que de casser la forme de réponse actuelle
+    // (un simple tableau, pas { properties: [...] }).
+    const limit = Math.min(parseInt(req.query.limit) || 100, 200);
+    const offset = parseInt(req.query.offset) || 0;
 
     const query = `
       SELECT id, name, property_type, bedrooms, beds, bathrooms, max_guests,
@@ -556,9 +629,10 @@ async function getProperties(req, res) {
       FROM property_profiles
       WHERE user_id = ?
       ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
     `;
 
-    const properties = await db.query(query, [userId]);
+    const properties = await db.query(query, [userId, limit, offset]);
 
     res.json(properties);
   } catch (error) {
@@ -653,6 +727,13 @@ async function updateProperty(req, res) {
         updateFields.push(`${field} = ?`);
         values.push(updates[field]);
       }
+    }
+
+    // Renaming by hand claims the name: a later "mettre à jour depuis Airbnb"
+    // must not revert it (see airbnbImportController.updateFromAirbnb).
+    if (updates.name !== undefined && String(updates.name).trim() !== String(current.name || '').trim()) {
+      updateFields.push('name_source = ?');
+      values.push('manual');
     }
 
     // Construire le contexte fusionné (DB + infos pratiques actuelles + nouvelles valeurs)

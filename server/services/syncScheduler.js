@@ -15,6 +15,7 @@ const sseClients = new Map();
 // Scheduler state
 let syncInterval = null;
 let icalSyncInterval = null;
+let initialSyncTimeout = null;
 let airbnbSyncRunning = false;
 let gmailSyncRunning = false;
 let icalSyncRunning = false;
@@ -120,41 +121,21 @@ async function runSyncCycle() {
 
     if (accounts.length === 0) return;
 
-    for (const account of accounts) {
+    await runAccountsConcurrently(accounts, async (account) => {
       try {
-        // Track message count before sync
-        const beforeCounts = await getConversationMessageCounts(db, account.user_id);
+        const sinceMessageId = await getMaxMessageId(db);
 
-        // Sync messages from Airbnb
-        await airbnbSync.fetchMessages(account.user_id, account.id);
+        const result = await airbnbSync.fetchMessages(account.user_id, account.id);
 
-        // Check for new messages
-        const afterCounts = await getConversationMessageCounts(db, account.user_id);
-
-        let hasNewMessages = false;
-        for (const [convId, count] of afterCounts) {
-          const prevCount = beforeCounts.get(convId) || 0;
-          if (count > prevCount) {
-            hasNewMessages = true;
-            // Get the new messages
-            const newMsgs = await db.query(
-              'SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?',
-              [convId, count - prevCount]
-            );
-            for (const msg of newMsgs) {
-              broadcastNewMessage(account.user_id, convId, msg);
-            }
-          }
-        }
-
-        if (hasNewMessages) {
-          broadcastConversationUpdate(account.user_id);
+        // Skip the follow-up query entirely when the sync appended nothing.
+        if (!result || result.synced > 0 || result.synced === undefined) {
+          await broadcastMessagesSince(db, account.user_id, sinceMessageId);
         }
       } catch (err) {
         // Don't stop the whole cycle if one account fails
         logger.error(`Sync cycle failed for account ${account.id}:`, err.message);
       }
-    }
+    });
   } catch (err) {
     logger.error('Sync cycle error:', err.message);
   } finally {
@@ -177,31 +158,14 @@ async function runGmailSyncCycle() {
 
     if (accounts.length === 0) return;
 
-    for (const account of accounts) {
+    await runAccountsConcurrently(accounts, async (account) => {
       try {
-        const beforeCounts = await getConversationMessageCounts(db, account.user_id);
+        const sinceMessageId = await getMaxMessageId(db);
 
-        await gmailSync.fetchMessages(account.user_id, account.id);
+        const result = await gmailSync.fetchMessages(account.user_id, account.id);
 
-        const afterCounts = await getConversationMessageCounts(db, account.user_id);
-
-        let hasNewMessages = false;
-        for (const [convId, count] of afterCounts) {
-          const prevCount = beforeCounts.get(convId) || 0;
-          if (count > prevCount) {
-            hasNewMessages = true;
-            const newMsgs = await db.query(
-              'SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?',
-              [convId, count - prevCount]
-            );
-            for (const msg of newMsgs) {
-              broadcastNewMessage(account.user_id, convId, msg);
-            }
-          }
-        }
-
-        if (hasNewMessages) {
-          broadcastConversationUpdate(account.user_id);
+        if (!result || result.synced > 0 || result.synced === undefined) {
+          await broadcastMessagesSince(db, account.user_id, sinceMessageId);
         }
       } catch (err) {
         if (err.message === 'GMAIL_INSUFFICIENT_SCOPES') {
@@ -213,7 +177,7 @@ async function runGmailSyncCycle() {
           logger.error(`Gmail sync cycle failed for account ${account.id}: ${err.message}`);
         }
       }
-    }
+    });
   } catch (err) {
     logger.error('Gmail sync cycle error:', err.message);
   } finally {
@@ -222,23 +186,77 @@ async function runGmailSyncCycle() {
 }
 
 /**
- * Get message counts per conversation for a user (single query)
+ * Run `worker` over every account with bounded concurrency.
+ *
+ * The cycles used to await one account at a time. Each Gmail account costs a
+ * threads.list plus one threads.get per thread — hundreds of milliseconds of
+ * pure network wait each — so with 100 connected accounts a strictly sequential
+ * cycle could not finish anywhere near its 60s period, and the `syncRunning`
+ * guard then skipped cycle after cycle: the last accounts in the list were
+ * effectively never synced.
+ *
+ * Concurrency stays deliberately modest. These are I/O-bound API calls, but
+ * every one of them writes through a single shared DB pool (max 1 connection on
+ * SQLite, 15 on MySQL), and Gmail applies per-user rate limits of its own.
  */
-async function getConversationMessageCounts(db, userId) {
+const ACCOUNT_SYNC_CONCURRENCY = 4;
+
+async function runAccountsConcurrently(accounts, worker) {
+  let cursor = 0;
+
+  async function drain() {
+    for (;;) {
+      const index = cursor++;
+      if (index >= accounts.length) return;
+      await worker(accounts[index]);
+    }
+  }
+
+  const lanes = Math.min(ACCOUNT_SYNC_CONCURRENCY, accounts.length);
+  await Promise.all(Array.from({ length: lanes }, drain));
+}
+
+/**
+ * Fetch the messages inserted by a sync run, for SSE broadcast.
+ *
+ * Replaces the previous before/after full-count diff, which ran
+ *   SELECT conversation_id, COUNT(*) … JOIN conversations … GROUP BY …
+ * over the user's ENTIRE message history TWICE per account per 60s cycle —
+ * two full scans per user per minute regardless of whether anything changed,
+ * and the dominant DB cost of the scheduler at 100+ users.
+ *
+ * A sync only ever appends rows, so the new messages are exactly those with an
+ * id greater than the table's max id captured just before the run. That is one
+ * indexed lookup before, one narrow range scan after, and nothing at all when
+ * the sync reported zero new messages.
+ */
+async function getMaxMessageId(db) {
+  const rows = await db.query('SELECT MAX(id) AS max_id FROM messages');
+  return (rows[0] && rows[0].max_id) || 0;
+}
+
+async function broadcastMessagesSince(db, userId, sinceMessageId) {
   const rows = await db.query(
-    `SELECT m.conversation_id, COUNT(*) as cnt
+    `SELECT m.id, m.conversation_id, m.role, m.content, m.created_at
      FROM messages m
      INNER JOIN conversations c ON c.id = m.conversation_id
-     WHERE c.user_id = ?
-     GROUP BY m.conversation_id`,
-    [userId]
+     WHERE m.id > ? AND c.user_id = ?
+     ORDER BY m.id ASC
+     LIMIT 200`,
+    [sinceMessageId, userId]
   );
 
-  const counts = new Map();
-  for (const row of rows) {
-    counts.set(row.conversation_id, row.cnt);
+  if (rows.length === 0) return;
+
+  for (const msg of rows) {
+    broadcastNewMessage(userId, msg.conversation_id, {
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      created_at: msg.created_at,
+    });
   }
-  return counts;
+  broadcastConversationUpdate(userId);
 }
 
 /**
@@ -260,7 +278,8 @@ function startScheduler() {
   }, ICAL_SYNC_INTERVAL_MS);
 
   // Run first sync after a short delay to let server fully start
-  setTimeout(() => {
+  initialSyncTimeout = setTimeout(() => {
+    initialSyncTimeout = null;
     runSyncCycle();
     runGmailSyncCycle();
     runIcalSyncCycle();
@@ -294,6 +313,10 @@ function stopScheduler() {
   if (icalSyncInterval) {
     clearInterval(icalSyncInterval);
     icalSyncInterval = null;
+  }
+  if (initialSyncTimeout) {
+    clearTimeout(initialSyncTimeout);
+    initialSyncTimeout = null;
   }
   logger.info('Sync scheduler stopped');
 }

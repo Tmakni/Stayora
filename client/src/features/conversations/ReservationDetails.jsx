@@ -8,7 +8,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
 import { BOOKING_STATUS_OPTIONS } from '../../lib/constants';
 import { useUpdateConversation } from '../../hooks/useConversations';
-import { formatDate } from '../../lib/utils';
+import { formatDate, guestDisplayName } from '../../lib/utils';
 
 function Field({ icon: Icon, label, value }) {
   if (!value) return null;
@@ -59,7 +59,7 @@ export function ReservationDetails({
         <section>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Réservation</h4>
           <div className="mt-1.5 divide-y divide-border/70">
-            <Field label="Voyageur" value={conversation?.guest_name || conversation?.title} />
+            <Field label="Voyageur" value={conversation ? guestDisplayName(conversation) : null} />
             <div className="flex items-center justify-between py-1.5">
               <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Plateforme</span>
               <PlatformBadge conversation={conversation} />

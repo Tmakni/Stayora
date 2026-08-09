@@ -21,6 +21,19 @@ const authRateLimiter = rateLimit({
   skipSuccessfulRequests: true, // Only count failed attempts
 });
 
+// Password-reset requests — 5 per hour per IP.
+// Deliberately does NOT set skipSuccessfulRequests: /forgot-password always
+// answers 200 (so it never reveals whether an email is registered), which means
+// authRateLimiter would count zero of its requests and leave the route wide
+// open to email-bombing an arbitrary address.
+const passwordResetRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Trop de demandes de réinitialisation. Réessayez dans une heure.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Rate limiter for import/scraping endpoints — heavy operations
 const importRateLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -33,5 +46,6 @@ const importRateLimiter = rateLimit({
 module.exports = {
   aiRateLimiter,
   authRateLimiter,
+  passwordResetRateLimiter,
   importRateLimiter,
 };

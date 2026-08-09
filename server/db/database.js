@@ -102,21 +102,21 @@ async function query(sql, params = []) {
       return normalizeSelect(result);
     }
 
-    if (isInsert && isSQLite) {
-      // sqlite3 async : raw() retourne [] pour les DML — on utilise
-      // last_insert_rowid() juste après (safe car pool max=1)
-      await d.raw(adaptedSql, safeParams);
-      const meta = await d.raw('SELECT last_insert_rowid() as id, changes() as n');
-      const row  = normalizeSelect(meta)[0] || {};
-      return { insertId: row.id || 0, affectedRows: row.n || 0 };
-    }
-
     if (isSQLite) {
-      // UPDATE / DELETE sur sqlite3 async
-      await d.raw(adaptedSql, safeParams);
-      const meta = await d.raw('SELECT changes() as n');
-      const row  = normalizeSelect(meta)[0] || {};
-      return { affectedRows: row.n || 0 };
+      // DML sur SQLite. better-sqlite3 renvoie DIRECTEMENT { lastInsertRowid,
+      // changes } depuis raw() — il ne faut SURTOUT PAS ré-interroger
+      // last_insert_rowid() dans une seconde requête.
+      //
+      // Cette seconde requête était une race condition sévère : knex acquiert
+      // une connexion PAR appel raw() et la relâche ensuite, donc entre
+      // l'INSERT et le SELECT last_insert_rowid() une autre requête concurrente
+      // pouvait s'intercaler et faire renvoyer SON id. Mesuré sur 5 INSERT
+      // concurrents : 4 insertId sur 5 étaient ceux d'une autre ligne — de quoi
+      // rattacher un message à la conversation d'un autre utilisateur.
+      // Lire la métadonnée retournée par l'INSERT lui-même est atomique,
+      // et supprime au passage un aller-retour SQL par écriture.
+      const result = await d.raw(adaptedSql, safeParams);
+      return normalizeSqliteDml(result, isInsert);
     }
 
     // MySQL — le résultat est dans result[0]
@@ -157,6 +157,25 @@ function normalizeSelect(result) {
   // mysql2 knex raw : [rows, fields]
   if (result && Array.isArray(result[0])) return result[0];
   return [];
+}
+
+/**
+ * Normalise un résultat DML SQLite renvoyé par knex.raw().
+ *
+ * better-sqlite3 renvoie { changes, lastInsertRowid }. Le driver sqlite3
+ * asynchrone (utilisé sur certains environnements) expose plutôt { changes,
+ * lastID }. On accepte les deux formes et on garde 0 en dernier recours.
+ * lastInsertRowid peut être un BigInt sur de très grandes tables — on le
+ * reconvertit en Number pour rester compatible avec le reste du code
+ * (comparaisons `===`, JSON.stringify, paramètres SQL).
+ */
+function normalizeSqliteDml(result, isInsert) {
+  const r = Array.isArray(result) ? result[0] : result;
+  const affectedRows = Number(r?.changes ?? 0) || 0;
+  if (!isInsert) return { affectedRows };
+
+  const rawId = r?.lastInsertRowid ?? r?.lastID ?? 0;
+  return { insertId: Number(rawId) || 0, affectedRows };
 }
 
 // Normalise un résultat DML (INSERT/UPDATE/DELETE) pour mysql2

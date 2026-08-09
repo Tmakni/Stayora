@@ -23,7 +23,12 @@ export const DialogContent = forwardRef(({ className, children, hideClose, ...pr
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-card p-5 shadow-popover data-[state=open]:animate-slide-up max-h-[85vh] overflow-y-auto',
+        // max-h uses dvh so the sheet shrinks with the visible viewport when the
+        // mobile keyboard opens (85vh would keep sizing to the full screen and
+        // hide the footer buttons behind the keyboard).
+        // overscroll-contain stops a scroll at the dialog's end from chaining
+        // to the page behind it.
+        'fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-card p-4 shadow-popover data-[state=open]:animate-slide-up max-h-[90dvh] overflow-y-auto overscroll-contain sm:w-[calc(100%-2rem)] sm:p-5',
         className
       )}
       {...props}

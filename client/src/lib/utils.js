@@ -42,6 +42,38 @@ export function formatDateShort(dateString) {
   return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+// Placeholder shown when no traveller name could be extracted from the mail.
+// Mirrors FALLBACK_GUEST_NAME in server/services/guestNameExtractor.js.
+export const FALLBACK_GUEST_NAME = 'Voyageur';
+
+/**
+ * Name to display for a conversation.
+ *
+ * Every Airbnb notification is sent by "Airbnb <express@airbnb.com>", and the
+ * sync used to fall back to that From display name — so rows showed "Airbnb"
+ * and titles read "Airbnb – La Villa Cosy". The backend now extracts the real
+ * traveller name, but this guard keeps any legacy row (or a conversation synced
+ * by an older server) from ever rendering as "Airbnb".
+ */
+export function guestDisplayName(conversation) {
+  if (!conversation) return FALLBACK_GUEST_NAME;
+
+  const guestName = (conversation.guest_name || '').trim();
+  if (guestName && guestName.toLowerCase() !== 'airbnb') return guestName;
+
+  const title = (conversation.title || '').trim();
+  if (title && title.toLowerCase() !== 'airbnb') {
+    // Titles are stored as "<name> – <property>"; a leading "Airbnb" segment is
+    // the placeholder, not a name.
+    const [head] = title.split(/\s+[–—-]\s+/);
+    const candidate = (head || '').trim();
+    if (candidate && candidate.toLowerCase() !== 'airbnb') return candidate;
+    return title.toLowerCase().startsWith('airbnb') ? FALLBACK_GUEST_NAME : title;
+  }
+
+  return FALLBACK_GUEST_NAME;
+}
+
 export function initials(name) {
   if (!name) return '?';
   const parts = String(name).trim().split(/\s+/).filter(Boolean);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Info, Loader2, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, Info, Loader2, Send, Sparkles, ExternalLink, RotateCw, CheckCheck, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ChatMessage } from './ChatMessage';
 import { AIReplyCard } from './AIReplyCard';
@@ -10,9 +10,9 @@ import { ErrorState } from '../../components/shared/ErrorState';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
-import { useConversation, useAddMessage, useSendAirbnb } from '../../hooks/useConversations';
+import { useConversation, useAddMessage, useSendAirbnb, useSendReply, useReplyStatus, useRetryReply } from '../../hooks/useConversations';
 import { useGenerateDraft } from '../../hooks/useAI';
-import { avatarColor, initials } from '../../lib/utils';
+import { avatarColor, initials, guestDisplayName } from '../../lib/utils';
 import { markRead } from '../../lib/readTracking';
 
 export function getAirbnbReplyUrl(conversation) {
@@ -25,15 +25,35 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
   const { data, isLoading, isError, refetch } = useConversation(id);
   const addMessage = useAddMessage();
   const sendAirbnb = useSendAirbnb();
+  const sendReply = useSendReply();
+  const retryReply = useRetryReply();
   const generateDraft = useGenerateDraft();
+  const replyStatus = useReplyStatus(id);
 
   const [composerText, setComposerText] = useState('');
   const [draft, setDraft] = useState(null);
   const [draftText, setDraftText] = useState('');
   const scrollRef = useRef(null);
 
+  // Synchronous double-submit guards. `isPending` is React state and only
+  // flips on the NEXT render, so two taps in the same frame — routine on a
+  // phone — both get through. For the Airbnb path that means the guest
+  // genuinely receives the message twice (unlike addMessage, the send-to-Airbnb
+  // endpoint has no server-side duplicate check).
+  const sendingRef = useRef(false);
+  const generatingRef = useRef(false);
+
   const conversation = data?.conversation;
   const messages = useMemo(() => data?.messages || [], [data]);
+
+  // Can we answer by replying to the Airbnb notification mail? The server
+  // decides — it is the only side that knows whether a usable Reply-To was
+  // captured and whether the Gmail token carries the send scope.
+  const canReplyByEmail = replyStatus.data?.can_reply === true;
+  const needsReauthorization = replyStatus.data?.needs_reauthorization === true;
+  const needsResync = replyStatus.data?.needs_resync === true;
+  const delivery = replyStatus.data?.latest || null;
+  const isDelivering = delivery?.status === 'pending' || delivery?.status === 'sending';
 
   useEffect(() => {
     if (id) markRead(id);
@@ -50,11 +70,25 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
 
   async function sendMessage(content, { fromDraft = false } = {}) {
     if (!content.trim() || !conversation) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     try {
-      if (conversation.has_airbnb_api) {
+      // Preferred path: reply to the Airbnb notification straight from the
+      // host's Gmail. One button, no redirect to Airbnb or Gmail — the message
+      // lands in the right Airbnb conversation because Airbnb routes the mail
+      // back through its per-thread Reply-To address.
+      if (canReplyByEmail) {
+        const result = await sendReply.mutateAsync({ id, message: content.trim() });
+        if (result?.duplicate) {
+          toast.info(result.message || 'Une réponse à ce message est déjà en cours.');
+        } else {
+          toast.success('Envoi en cours vers Airbnb…');
+        }
+      } else if (conversation.has_airbnb_api) {
         await sendAirbnb.mutateAsync({ id, message: content.trim() });
         toast.success('Message envoyé via Airbnb');
       } else if (conversation.is_airbnb) {
+        // Legacy fallback, only when e-mail replying is unavailable.
         await navigator.clipboard?.writeText(content.trim()).catch(() => {});
         await addMessage.mutateAsync({
           id,
@@ -73,12 +107,21 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
       setDraft(null);
       setDraftText('');
     } catch (err) {
-      toast.error(err.message || "Échec de l'envoi");
+      if (err.data?.needs_reauthorization) {
+        toast.error("Autorisation d'envoi Gmail manquante — reconnectez votre compte dans Intégrations.");
+      } else {
+        toast.error(err.message || "Échec de l'envoi");
+      }
+    } finally {
+      sendingRef.current = false;
     }
   }
 
   async function handleGenerateDraft() {
     if (!conversation) return;
+    // Each call is a billed model request — never let a double tap fire two.
+    if (generatingRef.current) return;
+    generatingRef.current = true;
     const lastIncoming = [...messages].reverse().find((m) => m.role === 'incoming');
     let parsedExtra = {};
     if (extraContext?.trim()) {
@@ -86,6 +129,9 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
         parsedExtra = JSON.parse(extraContext);
       } catch {
         toast.error('Le contexte supplémentaire doit être un JSON valide.');
+        // Release the guard on this early exit, otherwise the button stays
+        // permanently dead for the rest of the session.
+        generatingRef.current = false;
         return;
       }
     }
@@ -100,6 +146,8 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
       setDraftText(result.draft_reply || '');
     } catch (err) {
       toast.error(err.message || 'Impossible de générer une réponse.');
+    } finally {
+      generatingRef.current = false;
     }
   }
 
@@ -125,7 +173,9 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2.5 border-b border-border p-3">
+      {/* On mobile this thread is full-screen (AppShell hides the app header and
+          tab bar), so the thread header carries the top safe-area inset itself. */}
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-border bg-card p-3 pt-safe lg:pt-3">
         <Button variant="ghost" size="icon" className="shrink-0 lg:hidden" onClick={onBack} aria-label="Retour">
           <ArrowLeft className="size-4" />
         </Button>
@@ -134,10 +184,10 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
             conversation.property_id ?? conversation.id
           )}`}
         >
-          {initials(conversation.guest_name || conversation.title)}
+          {initials(guestDisplayName(conversation))}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">{conversation.guest_name || conversation.title}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{guestDisplayName(conversation)}</p>
           <div className="flex items-center gap-1.5">
             <PlatformBadge conversation={conversation} />
             <StatusBadge status={conversation.booking_status} />
@@ -158,6 +208,71 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
       </div>
 
       <div className="shrink-0 space-y-2.5 border-t border-border bg-card p-3 pb-safe">
+        {/* Delivery state of the last queued reply. Only shown when there is
+            something to say, so the composer stays uncluttered on a phone. */}
+        {delivery && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {isDelivering && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-1 font-medium text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                {delivery.status === 'pending' ? 'En attente' : 'Envoi…'}
+              </span>
+            )}
+            {delivery.status === 'sent' && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-1 font-medium text-success">
+                <CheckCheck className="size-3" />
+                Envoyé sur Airbnb
+              </span>
+            )}
+            {delivery.status === 'failed' && (
+              <>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2 py-1 font-medium text-danger">
+                  <AlertTriangle className="size-3" />
+                  Échec de l&apos;envoi
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={async () => {
+                    try {
+                      // Re-arms the same queue row — pressing this repeatedly
+                      // can never produce a second message.
+                      await retryReply.mutateAsync({ id, queueId: delivery.id });
+                      toast.success('Nouvelle tentative lancée');
+                    } catch (err) {
+                      toast.error(err.message || 'Impossible de réessayer');
+                    }
+                  }}
+                  disabled={retryReply.isPending}
+                >
+                  {retryReply.isPending ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-3" />}
+                  Réessayer
+                </Button>
+              </>
+            )}
+            {delivery.mode === 'auto' && delivery.status === 'sent' && (
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                Envoyé automatiquement par Michel
+              </span>
+            )}
+            {delivery.status === 'failed' && delivery.error && (
+              <span className="w-full truncate text-muted-foreground" title={delivery.error}>
+                {delivery.error}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Why the one-click send is unavailable, and what to do about it. */}
+        {!canReplyByEmail && (needsReauthorization || needsResync) && (
+          <p className="rounded-md bg-warning/10 px-2.5 py-2 text-xs text-foreground">
+            {needsReauthorization
+              ? "Pour envoyer directement depuis Michel, reconnectez votre compte Gmail (Intégrations → Réautoriser) afin d'autoriser l'envoi."
+              : "Les en-têtes de réponse ne sont pas encore enregistrés pour cette conversation. Lancez une synchronisation Gmail."}
+          </p>
+        )}
+
         {draft && (
           <AIReplyCard
             draft={draft}
@@ -185,22 +300,50 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
               placeholder="Écrivez votre réponse…"
               value={composerText}
               onChange={(e) => setComposerText(e.target.value)}
-              className="resize-none"
+              className="max-h-40 resize-none"
+              enterKeyHint="enter"
             />
             <div className="flex items-center justify-between gap-2">
-              <Button variant="outline" size="sm" onClick={handleGenerateDraft} disabled={generateDraft.isPending}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-0 flex-1 sm:flex-none"
+                onClick={handleGenerateDraft}
+                disabled={generateDraft.isPending}
+              >
                 {generateDraft.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                Générer un message IA
+                {/* The full label does not fit next to "Envoyer" at 360px. */}
+                <span className="truncate sm:hidden">Message IA</span>
+                <span className="hidden truncate sm:inline">Générer un message IA</span>
               </Button>
               <Button
                 size="sm"
+                className="shrink-0"
                 onClick={() => sendMessage(composerText)}
-                disabled={!composerText.trim() || addMessage.isPending || sendAirbnb.isPending}
+                disabled={
+                  !composerText.trim() || addMessage.isPending || sendAirbnb.isPending || sendReply.isPending
+                }
               >
-                {addMessage.isPending || sendAirbnb.isPending ? <Loader2 className="animate-spin" /> : <Send />}
-                Envoyer
+                {addMessage.isPending || sendAirbnb.isPending || sendReply.isPending
+                  ? <Loader2 className="animate-spin" />
+                  : <Send />}
+                {canReplyByEmail ? 'Envoyer sur Airbnb' : 'Envoyer'}
               </Button>
             </div>
+
+            {/* Secondary escape hatch — kept because the Airbnb link is still
+                useful, but it is no longer the way a reply is sent. */}
+            {conversation.is_airbnb && (
+              <a
+                href={getAirbnbReplyUrl(conversation)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 hover:underline"
+              >
+                <ExternalLink className="size-3.5" />
+                Ouvrir dans Airbnb
+              </a>
+            )}
           </>
         )}
       </div>
