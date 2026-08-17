@@ -142,14 +142,19 @@ async function processOne(row) {
       }
     }
 
+    // `permanent` was computed and then thrown away — markFailed received
+    // `err.permanent === true` instead, so an error explicitly flagged
+    // `retryable: false` (an unusable recipient, a rejected envelope) was still
+    // retried on every tick until it exhausted its attempts, re-hitting Gmail
+    // each time for a send that could never succeed.
     const permanent = err.permanent === true || (err.retryable === false && err.permanent !== false);
-    const outcome = await queue.markFailed(row.id, err, { permanent: err.permanent === true });
+    const outcome = await queue.markFailed(row.id, err, { permanent });
 
     if (err.message === 'GMAIL_SEND_SCOPE_MISSING') {
       // Surface it on the account so the UI can prompt for re-authorisation.
       await db.query(
-        'UPDATE gmail_accounts SET can_send = 0, sync_error = ? WHERE id = ?',
-        ["Autorisation d'envoi Gmail manquante — cliquez Réautoriser", row.gmail_account_id]
+        'UPDATE gmail_accounts SET can_send = 0 WHERE id = ? AND user_id = ?',
+        [row.gmail_account_id, row.user_id]
       ).catch(() => {});
     }
 

@@ -1,4 +1,8 @@
-const OpenAI = require('openai');
+// `openai` is loaded on first use, not at boot. server.js requires every route
+// → controller → service before app.listen(), so each top-level require of a
+// heavy SDK is time the API spends returning 503 "Server is starting". This one
+// is only needed when a draft is actually generated, which never happens during
+// startup.
 const config = require('../config/env');
 const logger = require('../utils/logger');
 const { buildSystemPrompt, buildUserPrompt, buildFineTunedPrompt } = require('./promptBuilder');
@@ -33,6 +37,7 @@ function initOpenAI() {
   }
   
   try {
+    const OpenAI = require('openai');
     openai = new OpenAI({
       apiKey: config.openai.apiKey
     });

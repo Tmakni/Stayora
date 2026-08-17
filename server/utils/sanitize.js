@@ -137,21 +137,76 @@ function validateExternalUrl(urlString) {
     if (!['http:', 'https:'].includes(u.protocol)) {
       return { valid: false, reason: 'Protocol must be http or https' };
     }
-    // Block private/internal IPs
+    // Block private/internal hosts.
+    //
+    // This list is what stands between an authenticated user and a
+    // server-side request to the infrastructure's own network: the iCal
+    // feature takes a URL from the user and the server fetches it
+    // (icalService → ical.async.fromURL), which is a textbook SSRF sink.
+    //
+    // The previous version matched a handful of literal prefixes and left real
+    // holes behind them: '127.0.0.1' as a prefix does not cover 127.0.0.2 — nor
+    // any of the rest of 127.0.0.0/8 — and IPv6 was represented only by the
+    // literal '[::1]', so [fd00::1] and the IPv4-mapped [::ffff:127.0.0.1] both
+    // sailed through. Ranges are matched as ranges below.
+    //
+    // Note the limit: this checks the host as WRITTEN. A public hostname whose
+    // DNS record points at a private address (rebinding) still resolves
+    // wherever DNS says, which would need resolve-then-pin at fetch time.
     const hostname = u.hostname.toLowerCase();
-    const blocked = [
-      'localhost', '127.0.0.1', '0.0.0.0', '[::1]', '169.254.',
-      '10.', '192.168.', 'metadata.google', 'metadata.aws',
-    ];
-    for (const b of blocked) {
-      if (hostname === b || hostname.startsWith(b)) {
+    // Node keeps IPv6 literals bracketed in `hostname`.
+    const bare = hostname.startsWith('[') && hostname.endsWith(']')
+      ? hostname.slice(1, -1)
+      : hostname;
+
+    const NAMED_BLOCKED = ['localhost', 'metadata.google', 'metadata.aws', 'metadata'];
+    for (const b of NAMED_BLOCKED) {
+      if (bare === b || bare.startsWith(`${b}.`)) {
         return { valid: false, reason: 'Internal/private addresses are not allowed' };
       }
     }
-    // Block 172.16.0.0/12
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) {
+    // Internal-only suffixes commonly used on private networks.
+    if (/\.(local|internal|localdomain|home|lan|intranet)$/.test(bare)) {
       return { valid: false, reason: 'Internal/private addresses are not allowed' };
     }
+
+    const PRIVATE_V4 = [
+      /^0\./,                        // "this" network
+      /^10\./,                       // RFC1918
+      /^127\./,                      // loopback, the whole /8
+      /^169\.254\./,                 // link-local + cloud metadata
+      /^172\.(1[6-9]|2\d|3[01])\./,  // RFC1918
+      /^192\.168\./,                 // RFC1918
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT 100.64/10
+      /^(22[4-9]|2[3-5]\d)\./,       // multicast + reserved
+    ];
+    for (const range of PRIVATE_V4) {
+      if (range.test(bare)) {
+        return { valid: false, reason: 'Internal/private addresses are not allowed' };
+      }
+    }
+
+    // IPv6, including the IPv4-mapped forms that smuggle a v4 loopback through.
+    if (bare.includes(':')) {
+      const v6 = bare.replace(/%.*$/, ''); // drop any zone index
+      const mappedV4 = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+      if (mappedV4) {
+        for (const range of PRIVATE_V4) {
+          if (range.test(mappedV4[1])) {
+            return { valid: false, reason: 'Internal/private addresses are not allowed' };
+          }
+        }
+      }
+      if (
+        v6 === '::1' || v6 === '::' ||
+        /^f[cd]/.test(v6) ||          // unique-local fc00::/7
+        /^fe[89ab]/.test(v6) ||       // link-local fe80::/10
+        /^::ffff:/.test(v6)           // any other IPv4-mapped literal
+      ) {
+        return { valid: false, reason: 'Internal/private addresses are not allowed' };
+      }
+    }
+
     return { valid: true, url: u.toString() };
   } catch {
     return { valid: false, reason: 'Invalid URL format' };

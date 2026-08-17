@@ -271,7 +271,7 @@ function startScheduler() {
     await runGmailSyncCycle();
   }, SYNC_INTERVAL_MS);
 
-  // iCal sync every 30 minutes
+  // iCal sync — voir ICAL_SYNC_INTERVAL_MS en haut du fichier (5 min).
   logger.info(`Starting iCal sync scheduler (interval: ${ICAL_SYNC_INTERVAL_MS / 60000}min)`);
   icalSyncInterval = setInterval(() => {
     runIcalSyncCycle();

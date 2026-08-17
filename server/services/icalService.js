@@ -4,9 +4,17 @@
  * Downloads and parses iCal/ICS calendars from Airbnb (or any source),
  * stores events in the DB, and provides availability checking.
  */
-const ical = require('node-ical');
+// node-ical is pulled in on first sync rather than at boot — nothing parses a
+// calendar while the server is still starting, and every eager require here is
+// time the API spends answering 503.
 const { getDatabase } = require('../config/db');
+const { validateExternalUrl } = require('../utils/sanitize');
 const logger = require('../utils/logger');
+
+// Deadline for downloading a feed. Generous enough for a large calendar on a
+// slow link, short enough that a stalled host cannot hold a draft generation
+// (or a scheduler tick) open behind it.
+const FETCH_TIMEOUT_MS = 15000;
 
 // ================================================================
 // iCal URL validation
@@ -116,9 +124,28 @@ async function syncPropertyCalendar(propertyId) {
   const cal = calendars[0];
   logger.info(`[iCal] Syncing property ${propertyId} from ${cal.ical_url}`);
 
+  // The URL is re-checked here, not only where it was saved. connectCalendar()
+  // validates what the user submits, but this function fetches whatever the row
+  // holds — including rows written before that check existed. Re-validating at
+  // the point of the request is what actually protects the fetch.
+  const urlCheck = validateExternalUrl(cal.ical_url);
+  if (!urlCheck.valid) {
+    const reason = `URL de calendrier refusée : ${urlCheck.reason}`;
+    await recordSyncError(db, propertyId, reason);
+    throw new Error(reason);
+  }
+
   try {
-    // Download and parse the iCal feed
-    const events = await ical.async.fromURL(cal.ical_url);
+    // Download and parse the iCal feed.
+    //
+    // Bounded on purpose: this runs on the scheduler AND, blocking, just before
+    // a draft is generated (aiController). Without a deadline an Airbnb endpoint
+    // that accepts the connection and then stalls holds the reply — and the
+    // scheduler tick behind it — open indefinitely.
+    const ical = require('node-ical');
+    const events = await ical.async.fromURL(urlCheck.url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
 
     let synced = 0;
     let skipped = 0;
@@ -149,7 +176,7 @@ async function syncPropertyCalendar(propertyId) {
       );
       await db.query(
         `INSERT INTO ical_events (property_id, event_uid, start_date, end_date, status, summary, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
         [propertyId, uid, startDate, endDate, status, summary]
       );
       synced++;
@@ -157,7 +184,7 @@ async function syncPropertyCalendar(propertyId) {
 
     // Update sync status
     await db.query(
-      `UPDATE ical_calendars SET last_synced_at = datetime('now'), sync_status = 'ok', sync_error = NULL, updated_at = datetime('now')
+      `UPDATE ical_calendars SET last_synced_at = NOW(), sync_status = 'ok', sync_error = NULL, updated_at = NOW()
        WHERE property_id = ?`,
       [propertyId]
     );
@@ -166,14 +193,28 @@ async function syncPropertyCalendar(propertyId) {
     return { synced, skipped };
 
   } catch (err) {
-    // Record error
-    await db.query(
-      `UPDATE ical_calendars SET sync_status = 'error', sync_error = ?, updated_at = datetime('now')
-       WHERE property_id = ?`,
-      [err.message.substring(0, 500), propertyId]
-    );
+    await recordSyncError(db, propertyId, err.message);
     logger.error(`[iCal] Sync failed for property ${propertyId}: ${err.message}`);
     throw err;
+  }
+}
+
+/**
+ * Stamp the failure on the calendar row.
+ *
+ * Its own errors are swallowed: this runs from a catch block, and letting a
+ * bookkeeping write throw would replace the real cause of the failure with a
+ * database message and lose the diagnosis.
+ */
+async function recordSyncError(db, propertyId, message) {
+  try {
+    await db.query(
+      `UPDATE ical_calendars SET sync_status = 'error', sync_error = ?, updated_at = NOW()
+       WHERE property_id = ?`,
+      [String(message || 'erreur inconnue').substring(0, 500), propertyId]
+    );
+  } catch (writeErr) {
+    logger.warn(`[iCal] Could not record sync error for property ${propertyId}: ${writeErr.message}`);
   }
 }
 

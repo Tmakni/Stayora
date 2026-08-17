@@ -25,8 +25,9 @@
  * address validation are unit-testable without touching the network.
  */
 
-const { gmail } = require('@googleapis/gmail');
-const { OAuth2Client } = require('google-auth-library');
+// Resolved on first send rather than at boot — see the same note in
+// gmailSyncService: these SDKs are the heaviest thing the process loads and
+// nothing sends mail while the server is still starting.
 const logger = require('../utils/logger');
 
 /**
@@ -204,6 +205,8 @@ function isRetryableError(err) {
 }
 
 function buildGmailClient(accessToken, refreshToken) {
+  const { gmail } = require('@googleapis/gmail');
+  const { OAuth2Client } = require('google-auth-library');
   const oauth2 = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,

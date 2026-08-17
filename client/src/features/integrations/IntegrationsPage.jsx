@@ -25,9 +25,13 @@ export function IntegrationsPage() {
   const fullSyncAirbnb = useFullSyncAirbnb();
   const removeAirbnb = useRemoveAirbnbAccount();
 
-  const gmailAccounts = gmailQuery.data?.accounts || [];
+  // The server only returns active accounts now, but filtering here too keeps
+  // a disconnected account from ever being rendered as a dead card that offers
+  // nothing but "Déconnecter" — and keeps the "Connecter Gmail" card, which is
+  // shown only when the list is empty, reachable after a disconnect.
+  const gmailAccounts = (gmailQuery.data?.accounts || []).filter((a) => a.is_active);
   const airbnbAccounts = airbnbQuery.data?.accounts || [];
-  const gmailConnected = gmailAccounts.some((a) => a.is_active);
+  const gmailConnected = gmailAccounts.length > 0;
   const loading = gmailQuery.isLoading || airbnbQuery.isLoading;
 
   async function handleConnectGmail() {
@@ -97,24 +101,41 @@ export function IntegrationsPage() {
               actions={[{ label: 'Connecter Gmail', onClick: handleConnectGmail, variant: 'default', loading: gmailAuthUrl.isPending }]}
             />
           ) : (
-            gmailAccounts.map((acc) => (
-              <IntegrationCard
-                key={acc.id}
-                icon="✉️"
-                name={`Gmail — ${acc.email}`}
-                statusLabel={acc.sync_status === 'error' ? 'Erreur' : acc.is_active ? 'Connecté' : 'Inactif'}
-                tone={acc.sync_status === 'error' ? 'danger' : acc.is_active ? 'success' : 'muted'}
-                description="Synchronisation automatique des messages voyageurs toutes les 60 secondes."
-                lastSyncAt={acc.last_sync_at}
-                errorMessage={acc.sync_status === 'error' ? acc.sync_error || 'Le token a peut-être expiré — réautorisez le compte.' : null}
-                actions={[
-                  ...(acc.sync_status === 'error'
-                    ? [{ label: 'Réautoriser', onClick: () => handleReauthorizeGmail(acc.id), variant: 'default', loading: reauthorizeGmail.isPending }]
-                    : []),
-                  { label: 'Déconnecter', onClick: () => handleRemoveGmail(acc.id), variant: 'outline', loading: removeGmail.isPending, className: 'text-danger' },
-                ]}
-              />
-            ))
+            gmailAccounts.map((acc) => {
+              // Two different reasons to re-consent, and only one of them used
+              // to surface a button. A token that syncs perfectly but lacks
+              // gmail.send leaves sync_status = 'idle', so the account looked
+              // healthy here while the Automations page told the user to come
+              // and click "Réautoriser" — a button that was never rendered.
+              const hasSyncError = acc.sync_status === 'error';
+              const cannotSend = !acc.can_send;
+              const needsReauthorization = hasSyncError || cannotSend;
+
+              return (
+                <IntegrationCard
+                  key={acc.id}
+                  icon="✉️"
+                  name={`Gmail — ${acc.email}`}
+                  statusLabel={hasSyncError ? 'Erreur' : cannotSend ? 'Envoi non autorisé' : 'Connecté'}
+                  tone={hasSyncError ? 'danger' : cannotSend ? 'warning' : 'success'}
+                  description="Synchronisation automatique des messages voyageurs toutes les 60 secondes."
+                  lastSyncAt={acc.last_sync_at}
+                  errorMessage={
+                    hasSyncError
+                      ? acc.sync_error || 'Le token a peut-être expiré — réautorisez le compte.'
+                      : cannotSend
+                        ? "Ce compte peut lire vos messages mais pas encore y répondre. Cliquez Réautoriser pour accorder l'autorisation d'envoi."
+                        : null
+                  }
+                  actions={[
+                    ...(needsReauthorization
+                      ? [{ label: 'Réautoriser', onClick: () => handleReauthorizeGmail(acc.id), variant: 'default', loading: reauthorizeGmail.isPending }]
+                      : []),
+                    { label: 'Déconnecter', onClick: () => handleRemoveGmail(acc.id), variant: 'outline', loading: removeGmail.isPending, className: 'text-danger' },
+                  ]}
+                />
+              );
+            })
           )}
 
           <IntegrationCard

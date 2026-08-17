@@ -3,14 +3,76 @@ services:
     name: michel
     runtime: docker
     plan: starter          # Le disque persistant nécessite au moins le plan Starter
+    healthCheckPath: /api/health
     disk:
       name: airbnb-data
       mountPath: /data
       sizeGB: 1
     envVars:
+      # ── Valeurs non secrètes, versionnées ici ──────────────────────────────
       - key: SQLITE_DB_PATH
         value: /data/airbnb_ai_agent.db
       - key: NODE_ENV
         value: production
+      # Nom historique trompeur : USE_MEMORY_DB=true ne veut PAS dire « base en
+      # RAM ». Cela sélectionne le chemin SQLite (voir knexfile.js), ici un
+      # fichier sur le disque persistant monté sur /data. Les données survivent
+      # donc bien aux redéploiements. Passer à false ferait basculer sur MySQL
+      # et exigerait de renseigner DB_HOST/DB_USER/DB_PASSWORD/DB_NAME.
       - key: USE_MEMORY_DB
         value: "true"
+
+      # ── Secrets : valeur saisie dans le dashboard Render, JAMAIS ici ───────
+      # sync: false = « cette variable est obligatoire, mais son contenu n'est
+      # pas dans ce fichier ». Render la réclame au moment du déploiement au
+      # lieu de laisser le service démarrer sans elle.
+      #
+      # On n'utilise DELIBEREMENT PAS generateValue: true sur les deux clés
+      # ci-dessous. Sur un service déjà déployé, régénérer :
+      #   - JWT_SECRET      → déconnecte tous les utilisateurs ;
+      #   - ENCRYPTION_KEY  → rend DEFINITIVEMENT indéchiffrables les tokens
+      #     OAuth Gmail déjà stockés (AES-256-GCM, clé dérivée du secret —
+      #     voir server/utils/encryption.js). Les hôtes devraient tous
+      #     reconnecter leur boîte Gmail, et les réponses automatiques
+      #     tomberaient en panne d'ici là.
+      # Ces deux clés doivent faire >= 32 caractères, sinon le serveur refuse
+      # de démarrer en production (server/config/env.js).
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # URL publique de l'app. Sert à la fois à l'allowlist CORS (server.js) et
+      # aux liens contenus dans les emails de réinitialisation de mot de passe
+      # (authController.js). Sans elle, CORS retombe sur un mode dégradé
+      # « même origine seulement » et les liens de reset partent relatifs.
+      - key: APP_URL
+        sync: false
+
+      # ── Google OAuth (Gmail) ──────────────────────────────────────────────
+      # GOOGLE_REDIRECT_URI doit correspondre EXACTEMENT à l'URI autorisée
+      # déclarée dans la console Google Cloud, sinon le retour OAuth échoue
+      # avec redirect_uri_mismatch :
+      #   https://<votre-domaine>/api/gmail/oauth-callback
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+
+      # ── SMTP — emails transactionnels ─────────────────────────────────────
+      # Sans SMTP_USER/SMTP_PASS, « mot de passe oublié » n'échoue pas : il
+      # se contente de logger le lien côté serveur, et l'utilisateur reste
+      # bloqué dehors sans message d'erreur. A renseigner avant l'ouverture
+      # aux vrais utilisateurs.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

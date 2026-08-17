@@ -7,8 +7,22 @@
  *
  * OAuth2 tokens are stored AES-256-GCM encrypted, identical to airbnb_accounts.
  */
-const { gmail } = require('@googleapis/gmail');
-const { OAuth2Client } = require('google-auth-library');
+// The Google SDKs are the heaviest dependency in the process and nothing calls
+// Gmail during startup, so they are resolved on first use instead of at
+// require() time. server.js loads every route → controller → service before
+// app.listen(), so an eager require here is time the whole API spends
+// answering 503 "Server is starting".
+let _gmailApi = null;
+function gmailApi() {
+  if (!_gmailApi) _gmailApi = require('@googleapis/gmail').gmail;
+  return _gmailApi;
+}
+let _OAuth2Client = null;
+function oauthClientClass() {
+  if (!_OAuth2Client) _OAuth2Client = require('google-auth-library').OAuth2Client;
+  return _OAuth2Client;
+}
+
 const { getDatabase } = require('../config/db');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sanitizeEmail, sanitizeString } = require('../utils/sanitize');
@@ -21,11 +35,27 @@ const {
   nameKey,
 } = require('./guestNameExtractor');
 
+/**
+ * Rend une date au format que la base attend : 'YYYY-MM-DD HH:MM:SS', en UTC.
+ *
+ * Ne JAMAIS lier un objet Date directement : sur le dialecte better-sqlite3,
+ * knex le convertit en `valueOf()`, donc en millisecondes entières, tandis que
+ * NOW() (traduit en datetime('now') par la couche db) écrit du texte. Mélanger
+ * les deux dans une même colonne casse tout tri, SQLite classant les entiers
+ * avant le texte quelle que soit la date réelle.
+ *
+ * Même convention que nowIso() dans outboundQueue.js.
+ */
+function toSqlDateTime(date) {
+  return new Date(date).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // ================================================================
 // OAuth2 helper
 // ================================================================
 
 function makeOAuth2Client() {
+  const OAuth2Client = oauthClientClass();
   return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -42,7 +72,7 @@ function getGmailClient(accessToken, refreshToken) {
     access_token: accessToken,
     refresh_token: refreshToken
   });
-  return gmail({ version: 'v1', auth: oauth2 });
+  return gmailApi()({ version: 'v1', auth: oauth2 });
 }
 
 // ================================================================
@@ -204,9 +234,16 @@ async function getUserGmailAccounts(userId) {
   const db = getDatabase();
   // can_send drives the "Réautoriser" prompt: accounts connected before the
   // gmail.send scope was added hold a token that cannot send.
+  //
+  // Only ACTIVE accounts are returned. A disconnected account keeps its row
+  // (audit trail, and the reconnect path reuses it) but has no tokens left, so
+  // there is nothing left to do with it — while it was still listed, the page
+  // showed a dead "Inactif" card whose only button was "Déconnecter" again, and
+  // the "Connecter Gmail" card stayed hidden because the account list was not
+  // empty. Disconnecting therefore left the user with no way back in.
   return db.query(
     `SELECT id, email, is_active, last_sync_at, sync_status, sync_error, can_send, created_at
-     FROM gmail_accounts WHERE user_id = ? ORDER BY created_at DESC`,
+     FROM gmail_accounts WHERE user_id = ? AND is_active = TRUE ORDER BY created_at DESC`,
     [userId]
   );
 }
@@ -216,10 +253,19 @@ async function getUserGmailAccounts(userId) {
  */
 async function deactivateAccount(userId, accountId) {
   const db = getDatabase();
-  await db.query(
-    'UPDATE gmail_accounts SET is_active = FALSE, access_token_enc = NULL, refresh_token_enc = NULL WHERE id = ? AND user_id = ?',
+  // Clearing sync_status/sync_error too: a disconnected account that kept
+  // sync_status = 'error' came back as a red "Erreur" card the moment it was
+  // reconnected, reporting a failure that belonged to the previous token.
+  // Returns whether a row actually changed, so the caller can answer 404
+  // instead of reporting success for an account that was never touched.
+  const result = await db.query(
+    `UPDATE gmail_accounts
+        SET is_active = FALSE, access_token_enc = NULL, refresh_token_enc = NULL,
+            sync_status = 'idle', sync_error = NULL
+      WHERE id = ? AND user_id = ? AND is_active = TRUE`,
     [accountId, userId]
   );
+  return (result.affectedRows || 0) > 0;
 }
 
 // ================================================================
@@ -518,17 +564,46 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     dbThreadId = existing[0].id;
     conversationId = existing[0].conversation_id;
 
+    // ── Reunite a conversation that was split before its Airbnb id was known ──
+    //
+    // Airbnb notification mails carry NO References/In-Reply-To header (2 of
+    // 3290 in a real mailbox), so Gmail can only thread them by SUBJECT — and
+    // Airbnb rewrites the subject as a booking advances ("Demande
+    // d'information pour X" → "Préapprobation pour X" → "Réservation pour X").
+    // Every rewrite therefore starts a NEW Gmail thread for the SAME Airbnb
+    // conversation, and each new Gmail thread became its own conversation here.
+    //
+    // The airbnb_thread_id is what puts them back together, but it was only
+    // ever consulted while REGISTERING a Gmail thread (the else-branch below).
+    // Once a thread was registered, this branch merely backfilled the id and
+    // never looked to see whether a sibling conversation already carried it —
+    // so a split that happened before the id could be extracted stayed split
+    // forever, and the host saw a two-message conversation where Airbnb showed
+    // a dozen.
+    if (airbnbThreadId) {
+      const survivorId = await reconcileAirbnbThread(db, userId, airbnbThreadId, conversationId);
+      if (survivorId !== conversationId) {
+        conversationId = survivorId;
+        await db.query(
+          'UPDATE gmail_threads SET conversation_id = ? WHERE id = ? AND user_id = ?',
+          [conversationId, dbThreadId, userId]
+        );
+      }
+    }
+
     // Backfill airbnb_thread_id and airbnb_reply_url if we now have them but they weren't stored before
     if (airbnbThreadId) {
       await db.query(
-        'UPDATE conversations SET airbnb_thread_id = ?, airbnb_reply_url = COALESCE(airbnb_reply_url, ?) WHERE id = ? AND (airbnb_thread_id IS NULL OR airbnb_thread_id = "")',
-        [airbnbThreadId, airbnbReplyUrl, conversationId]
+        `UPDATE conversations SET airbnb_thread_id = ?, airbnb_reply_url = COALESCE(airbnb_reply_url, ?)
+          WHERE id = ? AND user_id = ? AND (airbnb_thread_id IS NULL OR airbnb_thread_id = '')`,
+        [airbnbThreadId, airbnbReplyUrl, conversationId, userId]
       );
     } else if (airbnbReplyUrl) {
       // Store the reply URL even if we couldn't parse a clean thread ID
       await db.query(
-        'UPDATE conversations SET airbnb_reply_url = ? WHERE id = ? AND (airbnb_reply_url IS NULL OR airbnb_reply_url = "")',
-        [airbnbReplyUrl, conversationId]
+        `UPDATE conversations SET airbnb_reply_url = ?
+          WHERE id = ? AND user_id = ? AND (airbnb_reply_url IS NULL OR airbnb_reply_url = '')`,
+        [airbnbReplyUrl, conversationId, userId]
       );
     }
 
@@ -549,8 +624,11 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     // separate Gmail thread. We must group them by airbnb_thread_id, not Gmail thread ID.
     let existingConvId = null;
     if (airbnbThreadId) {
+      // Oldest wins, deterministically: an unordered LIMIT 1 let two syncs of
+      // the same Airbnb thread pick different "existing" conversations and keep
+      // splitting messages between them.
       const byAirbnbThread = await db.query(
-        'SELECT id FROM conversations WHERE user_id = ? AND airbnb_thread_id = ? LIMIT 1',
+        'SELECT id FROM conversations WHERE user_id = ? AND airbnb_thread_id = ? ORDER BY id ASC LIMIT 1',
         [userId, airbnbThreadId]
       );
       if (byAirbnbThread.length > 0) {
@@ -559,8 +637,8 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
         // Backfill property match if we now know it and the conversation doesn't yet
         if (matchedProperty) {
           await db.query(
-            'UPDATE conversations SET property_id = ? WHERE id = ? AND property_id IS NULL',
-            [matchedProperty.id, existingConvId]
+            'UPDATE conversations SET property_id = ? WHERE id = ? AND user_id = ? AND property_id IS NULL',
+            [matchedProperty.id, existingConvId, userId]
           );
         }
       }
@@ -571,6 +649,19 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       if (isAirbnb) {
         await maybeUpgradeGuestName(db, userId, conversationId, nameResult);
       }
+      // Register the Gmail thread — the name-fallback and create paths below
+      // both do it, but this one did not, so a thread grouped by
+      // airbnb_thread_id was never recorded. It still found its conversation on
+      // every later sync (the same lookup ran again), but it stayed invisible in
+      // gmail_threads: nothing linked the mail thread to the conversation, the
+      // last_message_at/last_synced_at bookkeeping never ran for it, and the
+      // repair paths that walk gmail_threads could not see it.
+      const tRes = await db.query(
+        `INSERT INTO gmail_threads (user_id, gmail_account_id, gmail_thread_id, conversation_id, sender_email, sender_name, subject, last_message_at, last_synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, accountId, threadId, conversationId, senderEmail, displayName, subject]
+      );
+      dbThreadId = tRes.insertId;
     } else {
       // ── Fallback: no airbnb_thread_id — try matching by guest name + property ──
       // This handles cases where the Airbnb URL extraction failed (changed URL format, etc.)
@@ -710,9 +801,22 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       role = 'incoming';
     }
 
-    const msgDate = fullMsg.internalDate
-      ? new Date(parseInt(fullMsg.internalDate))
-      : new Date();
+    // Écrit sous forme de chaîne 'YYYY-MM-DD HH:MM:SS', jamais comme objet Date.
+    //
+    // knex, sur le dialecte better-sqlite3, transforme tout binding Date en
+    // `valueOf()` — donc en millisecondes ENTIÈRES. Les autres écritures de ces
+    // mêmes colonnes passent par NOW(), que la couche db traduit en
+    // datetime('now'), c'est-à-dire du TEXTE. La colonne se retrouvait avec les
+    // deux types, et SQLite ordonne le texte APRÈS les entiers : dans
+    // `ORDER BY updated_at DESC`, toute conversation datée en texte passait
+    // devant toute conversation datée en entier, quelle que soit la date réelle.
+    // Les conversations les plus récentes se retrouvaient donc en bas de la
+    // liste. Même effet sur l'ordre des messages d'un fil.
+    //
+    // UTC des deux côtés : datetime('now') est en UTC, toISOString() aussi.
+    const msgDate = toSqlDateTime(
+      fullMsg.internalDate ? new Date(parseInt(fullMsg.internalDate, 10)) : new Date()
+    );
 
     // gmail_message_id is written to its own indexed column as well as into
     // metadata_json: the de-duplication lookup used to read EVERY message row of
@@ -899,6 +1003,147 @@ async function persistHostNames(db, accountId, hostNames) {
   }
 }
 
+// Tables that point at a conversation and must follow it through a merge.
+// `messages` is the one exception, handled separately below because it needs
+// de-duplication rather than a blind repoint. gmail_threads IS in this list —
+// every thread of the losing conversation moves — and the caller additionally
+// repoints the specific row it is holding, which is harmless repetition.
+const CONVERSATION_REFERENCES = [
+  'gmail_threads',
+  'airbnb_threads',
+  'outbound_replies',
+  'property_qa',
+  'reservations',
+  'webhook_logs',
+];
+
+/**
+ * Collapse every conversation that carries the same Airbnb thread id for this
+ * user into one, and return the id of the survivor.
+ *
+ * Two conversations sharing an airbnb_thread_id ARE the same Airbnb
+ * conversation — that id is Airbnb's own key for the message thread — so the
+ * split is always an artefact of Gmail having filed the notifications under
+ * several mail threads. The oldest conversation wins, which makes the outcome
+ * independent of the order in which the Gmail threads happen to sync.
+ *
+ * `currentConvId` is folded in even when it does not carry the id yet: it is
+ * about to be given it by the caller's backfill, and merging in the same pass
+ * is what lets a conversation that was split BEFORE the id could be extracted
+ * be repaired the first time either half is re-synced.
+ */
+async function reconcileAirbnbThread(db, userId, airbnbThreadId, currentConvId) {
+  if (!airbnbThreadId || !currentConvId) return currentConvId;
+
+  const rows = await db.query(
+    'SELECT id FROM conversations WHERE user_id = ? AND airbnb_thread_id = ?',
+    [userId, airbnbThreadId]
+  );
+
+  const ids = new Set(rows.map((r) => r.id));
+  ids.add(currentConvId);
+  if (ids.size < 2) return currentConvId;
+
+  const [target, ...duplicates] = [...ids].sort((a, b) => a - b);
+  for (const duplicateId of duplicates) {
+    const moved = await mergeConversationInto(db, userId, duplicateId, target);
+    logger.info(
+      `Gmail sync: conversation ${duplicateId} merged into ${target} ` +
+      `(Airbnb thread ${airbnbThreadId}, ${moved} message(s) moved)`
+    );
+  }
+  return target;
+}
+
+/**
+ * Fold `sourceConvId` into `targetConvId` and delete the emptied source.
+ *
+ * Every statement is predicated on user_id: a merge moves messages between
+ * conversations, which is exactly the operation that must never be able to
+ * cross an account boundary, however malformed the ids reaching it are.
+ *
+ * Returns the number of messages moved.
+ */
+async function mergeConversationInto(db, userId, sourceConvId, targetConvId) {
+  if (!sourceConvId || !targetConvId || sourceConvId === targetConvId) return 0;
+
+  // Both endpoints must belong to the caller. Reading them back (rather than
+  // trusting the ids) is what makes the unscoped UPDATEs below safe.
+  const owned = await db.query(
+    'SELECT id FROM conversations WHERE id IN (?, ?) AND user_id = ?',
+    [sourceConvId, targetConvId, userId]
+  );
+  if (owned.length !== 2) {
+    logger.warn(
+      `Gmail sync: refusing to merge conversation ${sourceConvId} into ${targetConvId} — not both owned by user ${userId}`
+    );
+    return 0;
+  }
+
+  // Drop the source rows the target already holds, so a Gmail message that was
+  // synced into both halves does not survive the merge twice.
+  //
+  // The overlap is resolved in JS rather than with
+  // `DELETE ... WHERE gmail_message_id IN (SELECT ... FROM messages ...)`:
+  // MySQL refuses a subquery that reads the very table being deleted from
+  // (error 1093), so that form would work on SQLite in dev and fail in
+  // production.
+  const [sourceRows, targetRows] = await Promise.all([
+    db.query('SELECT id, gmail_message_id FROM messages WHERE conversation_id = ?', [sourceConvId]),
+    db.query('SELECT gmail_message_id FROM messages WHERE conversation_id = ? AND gmail_message_id IS NOT NULL', [targetConvId]),
+  ]);
+
+  const targetGmailIds = new Set(targetRows.map((r) => r.gmail_message_id));
+  const redundantIds = sourceRows
+    .filter((r) => r.gmail_message_id && targetGmailIds.has(r.gmail_message_id))
+    .map((r) => r.id);
+
+  if (redundantIds.length > 0) {
+    const placeholders = redundantIds.map(() => '?').join(',');
+    await db.query(`DELETE FROM messages WHERE id IN (${placeholders})`, redundantIds);
+  }
+
+  const moved = sourceRows.length - redundantIds.length;
+
+  await db.query('UPDATE messages SET conversation_id = ? WHERE conversation_id = ?', [targetConvId, sourceConvId]);
+
+  for (const table of CONVERSATION_REFERENCES) {
+    try {
+      await db.query(`UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ?`, [targetConvId, sourceConvId]);
+    } catch (err) {
+      // An optional table may not exist on an older deployment; the merge of
+      // the messages themselves is what matters and has already happened.
+      logger.warn(`Gmail sync: could not repoint ${table} during merge: ${err.message}`);
+    }
+  }
+
+  // Keep whatever the source knew that the target does not. Read first, then
+  // write literal values: MySQL rejects a subquery on the table being updated
+  // (error 1093), so the COALESCE-from-subquery form would only work on SQLite.
+  const [sourceConv] = await db.query(
+    'SELECT property_id, airbnb_reply_url FROM conversations WHERE id = ? AND user_id = ?',
+    [sourceConvId, userId]
+  );
+  if (sourceConv && (sourceConv.property_id || sourceConv.airbnb_reply_url)) {
+    const [targetConv] = await db.query(
+      'SELECT property_id, airbnb_reply_url FROM conversations WHERE id = ? AND user_id = ?',
+      [targetConvId, userId]
+    );
+    const propertyId = targetConv?.property_id || sourceConv.property_id || null;
+    const replyUrl = targetConv?.airbnb_reply_url || sourceConv.airbnb_reply_url || null;
+    if (propertyId !== targetConv?.property_id || replyUrl !== targetConv?.airbnb_reply_url) {
+      await db.query(
+        'UPDATE conversations SET property_id = ?, airbnb_reply_url = ? WHERE id = ? AND user_id = ?',
+        [propertyId, replyUrl, targetConvId, userId]
+      );
+    }
+  }
+
+  await db.query('DELETE FROM conversations WHERE id = ? AND user_id = ?', [sourceConvId, userId]);
+
+  return moved;
+}
+
 /**
  * Persist a better guest name on an existing conversation.
  *
@@ -963,32 +1208,59 @@ async function findExistingConversationFallback(db, userId, guestName, matchedPr
 
   const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
-  // If we know the property, constrain to it for higher confidence
-  let rows;
+  // The name is matched in SQL, not in JS after the fact.
+  //
+  // This used to fetch the 20 (or 40) most recently updated conversations and
+  // then look for the name among them — so on a busy account the conversation
+  // being looked for was routinely outside the window, the fallback reported
+  // "no match", and the notification opened yet another conversation holding a
+  // single message. It is why one traveller ends up with five or six separate
+  // threads for the same stay ("Thibaud / La Planquette" occupies six) while
+  // Airbnb shows one continuous conversation.
+  //
+  // guest_name is matched case-insensitively here and re-checked with nameKey()
+  // below, which also strips accents — LOWER() is ASCII-only in SQLite, so the
+  // SQL predicate is the fast index-backed filter and nameKey() is the decision.
+  const params = [userId, cutoff, guestName.toLowerCase()];
+  let propertyPredicate = '';
   if (matchedProperty) {
-    rows = await db.query(
-      `SELECT id, guest_name FROM conversations
-       WHERE user_id = ? AND property_id = ?
-         AND external_provider = 'gmail'
-         AND created_at >= ?
-       ORDER BY updated_at DESC LIMIT 20`,
-      [userId, matchedProperty.id, cutoff]
-    );
-  } else {
-    rows = await db.query(
-      `SELECT id, guest_name FROM conversations
-       WHERE user_id = ?
-         AND external_provider = 'gmail'
-         AND created_at >= ?
-       ORDER BY updated_at DESC LIMIT 40`,
-      [userId, cutoff]
-    );
+    propertyPredicate = 'AND property_id = ?';
+    params.push(matchedProperty.id);
   }
 
+  const rows = await db.query(
+    `SELECT id, guest_name FROM conversations
+      WHERE user_id = ?
+        AND external_provider = 'gmail'
+        AND created_at >= ?
+        AND guest_name IS NOT NULL
+        AND LOWER(guest_name) = ?
+        ${propertyPredicate}
+      ORDER BY id ASC`,
+    params
+  );
+
   for (const row of rows) {
-    if (!row.guest_name) continue;
     // Exact match only — merging on the first name alone mixed up distinct
-    // travellers who happen to share one.
+    // travellers who happen to share one. Oldest wins (ORDER BY id) so every
+    // notification of one stay converges on the same conversation.
+    if (nameKey(row.guest_name) === normalizedName) return row.id;
+  }
+
+  // Accented spellings that LOWER() cannot equate ("Gaëlle" vs "GAELLE") are
+  // rare but real; they get a bounded scan rather than an unbounded one.
+  const accentFallback = await db.query(
+    `SELECT id, guest_name FROM conversations
+      WHERE user_id = ?
+        AND external_provider = 'gmail'
+        AND created_at >= ?
+        AND guest_name IS NOT NULL
+        ${propertyPredicate}
+      ORDER BY id ASC
+      LIMIT 500`,
+    matchedProperty ? [userId, cutoff, matchedProperty.id] : [userId, cutoff]
+  );
+  for (const row of accentFallback) {
     if (nameKey(row.guest_name) === normalizedName) return row.id;
   }
 
@@ -1058,16 +1330,23 @@ function extractAirbnbThreadIdFromMessage(gmailMessageData) {
   function searchContent(text) {
     if (!text) return null;
 
-    // Step A: decode any tracking redirect params (url=, redirect=, to=, dest=)
+    // Step A: decode any tracking redirect params (url=, redirect=, to=, dest=, upn=)
     // Airbnb emails wrap links: href="https://email.airbnb.com/ls/click?upn=...&url=https%3A%2F%2F..."
-    const redirectParamRe = /[?&](?:url|redirect|to|dest|link)=([^&"'\s]{20,})/gi;
+    //
+    // upn= is SendGrid's own wrapper (these mails are sent through SendGrid —
+    // their Message-IDs end in @geopod-ismtpd-NN) and it does NOT use percent
+    // escapes: the destination is encoded with "-" instead of "%", so a link
+    // reads ...upn=https-3A-2F-2Fwww.airbnb.fr-2Fhosting-2Fthread-2F248… . It was
+    // named in this function's doc comment from the start but never actually
+    // decoded, so on any mail whose thread link exists only inside a tracking
+    // wrapper the id was unrecoverable.
+    const redirectParamRe = /[?&](?:url|redirect|to|dest|link|upn)=([^&"'\s]{20,})/gi;
     let rdMatch;
     while ((rdMatch = redirectParamRe.exec(text)) !== null) {
-      try {
-        const decoded = decodeURIComponent(rdMatch[1]);
+      for (const decoded of decodeRedirectTarget(rdMatch[1])) {
         const found = searchRawUrl(decoded);
         if (found) return found;
-      } catch (_) {}
+      }
     }
 
     // Step B: look for percent-encoded Airbnb paths directly in text
@@ -1090,8 +1369,21 @@ function extractAirbnbThreadIdFromMessage(gmailMessageData) {
   function searchRawUrl(text) {
     if (!text) return null;
 
+    // /hosting/thread/<id> — the format Airbnb actually sends today. Every
+    // thread link in a current notification mail looks like
+    //   https://www.airbnb.fr/hosting/thread/2482565367?open_scheduled_messages=…
+    // It matches none of the historical patterns below, so before this line the
+    // id could only ever be recovered by the loose catch-all at the bottom —
+    // which takes the FIRST 8-digit number under any airbnb.<tld>/ URL and
+    // therefore just as happily returns a listing or user id.
+    let m = text.match(/\/hosting\/thread\/(\d+)/i);
+    if (m) {
+      const tid = m[1];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/thread/${tid}` };
+    }
+
     // /hosting/inbox/thread/<id>  (desktop, app, fr + com)
-    let m = text.match(/\/hosting\/inbox(?:\/thread)?\/(\d+)/i);
+    m = text.match(/\/hosting\/inbox(?:\/thread)?\/(\d+)/i);
     if (m) {
       const tid = m[1];
       return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
@@ -1132,11 +1424,21 @@ function extractAirbnbThreadIdFromMessage(gmailMessageData) {
       return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
     }
 
-    // Any numeric ID (8+ digits) embedded in an airbnb URL
-    m = text.match(/airbnb\.[a-z]{2,6}\/[^"'\s]*?\/(\d{8,})/i);
-    if (m) {
-      const tid = m[1];
-      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/inbox/thread/${tid}` };
+    // Last resort: any 8+ digit id embedded in an airbnb URL.
+    //
+    // Airbnb mails carry plenty of other long numeric ids — the listing
+    // (/rooms/, /hosting/listings/), the traveller (/users/show/), the booking
+    // (/reservations/) — and taking the first one as the conversation id is
+    // worse than finding nothing: every conversation about one listing would
+    // collapse onto the same /rooms/ id and be merged into a single thread.
+    // Those paths are therefore skipped rather than blindly accepted.
+    const NON_THREAD_PATH = /\/(?:rooms|listings|users|reservations|account-settings|payments|payouts|experiences|wishlists|help|reviews)\//i;
+    const genericRe = /airbnb\.[a-z]{2,6}\/([^"'\s]*?)\/(\d{8,})/gi;
+    let gm;
+    while ((gm = genericRe.exec(text)) !== null) {
+      if (NON_THREAD_PATH.test(`/${gm[1]}/`)) continue;
+      const tid = gm[2];
+      return { threadId: tid, replyUrl: `https://www.airbnb.com/hosting/thread/${tid}` };
     }
 
     return null;
@@ -1158,6 +1460,51 @@ function extractAirbnbThreadIdFromMessage(gmailMessageData) {
   }
 
   return { threadId: null, replyUrl: null };
+}
+
+/**
+ * Candidate plaintexts for a tracking-redirect parameter value.
+ *
+ * Returns every decoding worth searching rather than guessing which one
+ * applies: the same `?upn=`/`?url=` slot carries percent-escaped URLs,
+ * SendGrid's "-2F" dash-escaped URLs, and base64 payloads depending on the
+ * template. The raw value is included last so a plain, unencoded URL still
+ * gets searched.
+ */
+function decodeRedirectTarget(rawValue) {
+  const out = [];
+  const push = (value) => {
+    if (value && typeof value === 'string' && !out.includes(value)) out.push(value);
+  };
+
+  try {
+    push(decodeURIComponent(rawValue));
+  } catch (_) {
+    // Percent sequence was malformed — the other decodings may still work.
+  }
+
+  // SendGrid: "-2F" → "/", "-3A" → ":", i.e. percent-escapes written with "-".
+  if (/-[0-9A-F]{2}/i.test(rawValue)) {
+    push(rawValue.replace(/-([0-9A-F]{2})/gi, (_, hex) => {
+      const code = parseInt(hex, 16);
+      // Leave "-XY" alone when it is not a printable ASCII escape, otherwise a
+      // literal hyphen in the payload turns into a control character.
+      return code >= 0x20 && code < 0x7f ? String.fromCharCode(code) : `-${hex}`;
+    }));
+  }
+
+  // Some templates base64 the destination instead of escaping it.
+  if (/^[A-Za-z0-9+/_-]{24,}={0,2}$/.test(rawValue)) {
+    try {
+      const decoded = Buffer.from(
+        rawValue.replace(/-/g, '+').replace(/_/g, '/'), 'base64'
+      ).toString('utf8');
+      if (/airbnb/i.test(decoded)) push(decoded);
+    } catch (_) {}
+  }
+
+  push(rawValue);
+  return out;
 }
 
 /**
@@ -1629,7 +1976,7 @@ async function exchangeCode(code) {
 
   // Actually test Gmail API access — the token's scope field can be unreliable
   try {
-    const testGmail = gmail({ version: 'v1', auth: oauth2 });
+    const testGmail = gmailApi()({ version: 'v1', auth: oauth2 });
     await testGmail.users.labels.list({ userId: 'me' });
     logger.info('Gmail API access verified successfully');
   } catch (testErr) {
@@ -1645,7 +1992,7 @@ async function exchangeCode(code) {
   }
 
   // Get user email via Gmail profile (avoids needing the full oauth2 API)
-  const gmailClient = gmail({ version: 'v1', auth: oauth2 });
+  const gmailClient = gmailApi()({ version: 'v1', auth: oauth2 });
   const profile = await gmailClient.users.getProfile({ userId: 'me' });
 
   return {
@@ -1736,5 +2083,13 @@ module.exports = {
   // message manquant par cause réelle plutôt que par supposition.
   __extractBody: extractBody,
   __extractAirbnbMessage: extractAirbnbMessage,
-  __detectAirbnbMessageRole: detectAirbnbMessageRole
+  __detectAirbnbMessageRole: detectAirbnbMessageRole,
+  // Exposés pour les tests (server/tests/gmailThreadMerge.test.js) et le script
+  // de réparation (scripts/repair-split-conversations.js). syncGmailThread
+  // n'appelle plus l'API Gmail — les messages lui sont passés déjà chargés —
+  // donc il est testable directement, sans réseau.
+  __syncGmailThread: syncGmailThread,
+  __mergeConversationInto: mergeConversationInto,
+  __reconcileAirbnbThread: reconcileAirbnbThread,
+  __extractAirbnbThreadIdFromMessage: extractAirbnbThreadIdFromMessage
 };

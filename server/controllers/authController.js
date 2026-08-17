@@ -109,7 +109,14 @@ async function register(req, res) {
       { algorithm: 'HS256', expiresIn: config.jwt.expiresIn }
     );
 
-    // Token only in httpOnly cookie — never in response body
+    // ATTENTION — ce commentaire affirmait « token only in httpOnly cookie,
+    // never in response body », ce que la ligne `token` du JSON ci-dessous
+    // contredit depuis toujours. Le jeton part AUSSI dans le corps, le client
+    // le range dans localStorage (client/src/lib/api.js) et l'ajoute en query
+    // string pour le flux SSE — donc la protection httpOnly du cookie ne
+    // protège rien aujourd'hui : une XSS lit le jeton dans localStorage.
+    // Le supprimer d'ici casserait SSE (useSSE.js s'appuie sur getToken()) :
+    // voir la note de revue pour la marche à suivre.
     res.cookie('token', token, cookieOptions());
 
     logger.info(`User registered: ${cleanEmail}`);
@@ -609,6 +616,107 @@ async function resetPassword(req, res) {
   }
 }
 
+/**
+ * Best-effort revocation of a user's Google OAuth grant.
+ *
+ * Deleting our own rows stops US from using the tokens, but the grant itself
+ * lives at Google until it is revoked there — so without this the user's Gmail
+ * would still list the app as authorised after they closed their account.
+ * Never throws: a Google outage must not be able to block an account deletion
+ * the user is legally entitled to.
+ */
+async function revokeGoogleGrants(db, userId) {
+  let accounts = [];
+  try {
+    accounts = await db.query(
+      'SELECT refresh_token_enc FROM gmail_accounts WHERE user_id = ?',
+      [userId]
+    );
+  } catch (_) {
+    return; // table may not exist yet
+  }
+
+  const { decrypt } = require('../utils/encryption');
+
+  for (const account of accounts) {
+    try {
+      const refreshToken = decrypt(account.refresh_token_enc);
+      if (!refreshToken) continue;
+
+      await fetch('https://oauth2.googleapis.com/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: refreshToken }).toString(),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (err) {
+      logger.warn(`Google token revocation failed during account deletion for user ${userId}: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * DELETE /api/auth/account
+ * Body: { password }
+ *
+ * RGPD art. 17 ("droit à l'effacement"). Irreversible, so it demands the
+ * account password even though the caller is already authenticated — the same
+ * bar changePassword() sets, for a far more destructive action.
+ *
+ * Order matters. outbound_replies is the ONE table carrying user_id that has no
+ * foreign key to users (see migrations/db/017_email_reply_pipeline.js), so it is
+ * not covered by the ON DELETE CASCADE that clears every other table. Its rows
+ * are queued emails: leaving them behind would let replyWorker keep claiming
+ * pending rows belonging to an account that no longer exists. They are therefore
+ * deleted explicitly, and FIRST, so the worker cannot pick one up mid-deletion.
+ */
+async function deleteAccount(req, res) {
+  try {
+    const { password } = req.body;
+
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Mot de passe requis pour confirmer la suppression.' });
+    }
+
+    const db = getDatabase();
+
+    const users = await db.query(
+      'SELECT id, email, password_hash FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+
+    const user = users[0];
+
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    if (!isValid) {
+      return res.status(400).json({ error: 'Mot de passe incorrect.' });
+    }
+
+    // Revoke at Google BEFORE the rows holding the tokens are cascaded away.
+    await revokeGoogleGrants(db, user.id);
+
+    // Not covered by CASCADE — must go explicitly, before the user row.
+    await db.query('DELETE FROM outbound_replies WHERE user_id = ?', [user.id]);
+
+    // Cascades to property_profiles, conversations, messages, reservations,
+    // gmail_accounts/threads, ical_*, property_qa/photos, password_reset_tokens…
+    await db.query('DELETE FROM users WHERE id = ?', [user.id]);
+
+    res.clearCookie('token', { ...cookieOptions(), maxAge: undefined });
+
+    logger.info(`Account deleted for user ${user.id}`);
+
+    return res.json({ success: true, message: 'Votre compte et toutes vos données ont été supprimés.' });
+  } catch (error) {
+    logger.error('Delete account error:', error);
+    return res.status(500).json({ error: 'Erreur lors de la suppression du compte.' });
+  }
+}
+
 module.exports = {
   register,
   login,
@@ -616,5 +724,6 @@ module.exports = {
   refresh,
   changePassword,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  deleteAccount
 };

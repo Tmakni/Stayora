@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Sun, Moon, LogOut } from 'lucide-react';
+import { Loader2, Sun, Moon, LogOut, Trash2 } from 'lucide-react';
 import { PageContainer, PageHeader } from '../../components/shared/PageHeader';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -24,6 +24,14 @@ export function SettingsPage() {
   const [pwError, setPwError] = useState('');
 
   const changePassword = useMutation({ mutationFn: (payload) => api.auth.changePassword(payload) });
+
+  // Suppression de compte (RGPD art. 17). Deux confirmations distinctes sont
+  // demandées — le mot de passe ET la saisie du mot SUPPRIMER — parce que
+  // l'action est irréversible et efface aussi les conversations voyageurs.
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const deleteAccount = useMutation({ mutationFn: (password) => api.auth.deleteAccount(password) });
 
   function selectTheme(next) {
     applyTheme(next);
@@ -54,6 +62,28 @@ export function SettingsPage() {
       setConfirmPassword('');
     } catch (err) {
       setPwError(err.message || 'Échec de la mise à jour.');
+    }
+  }
+
+  async function handleDeleteAccount(e) {
+    e.preventDefault();
+    setDeleteError('');
+    if (deleteConfirmText.trim().toUpperCase() !== 'SUPPRIMER') {
+      setDeleteError('Saisissez SUPPRIMER pour confirmer.');
+      return;
+    }
+    if (!deletePassword) {
+      setDeleteError('Votre mot de passe est requis.');
+      return;
+    }
+    try {
+      await deleteAccount.mutateAsync(deletePassword);
+      // Le compte n'existe plus : purger la session locale avant de rediriger,
+      // sinon le jeton resté en mémoire ferait échouer le prochain /me en 404.
+      logout();
+      navigate('/login');
+    } catch (err) {
+      setDeleteError(err.message || 'Échec de la suppression.');
     }
   }
 
@@ -116,6 +146,51 @@ export function SettingsPage() {
               <Button type="submit" size="sm" disabled={changePassword.isPending}>
                 {changePassword.isPending && <Loader2 className="animate-spin" />}
                 Modifier le mot de passe
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card className="border-danger/40">
+          <CardHeader>
+            <CardTitle className="text-danger">Supprimer mon compte</CardTitle>
+            <CardDescription>
+              Cette action est <strong>définitive</strong>. Votre compte, vos logements, vos
+              conversations et vos connexions Gmail seront effacés immédiatement et ne pourront
+              pas être restaurés.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="max-w-sm space-y-3" onSubmit={handleDeleteAccount}>
+              {deleteError && <p className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{deleteError}</p>}
+              <div className="space-y-1.5">
+                <Label htmlFor="delete-password">Mot de passe</Label>
+                <Input
+                  id="delete-password"
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="delete-confirm">Tapez SUPPRIMER pour confirmer</Label>
+                <Input
+                  id="delete-confirm"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="SUPPRIMER"
+                  autoComplete="off"
+                />
+              </div>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-danger text-white hover:bg-danger/90"
+                disabled={deleteAccount.isPending}
+              >
+                {deleteAccount.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                Supprimer définitivement mon compte
               </Button>
             </form>
           </CardContent>

@@ -115,6 +115,8 @@ export const api = {
     changePassword: (payload) => request('/api/auth/password', { method: 'PUT', body: payload }),
     requestPasswordReset: (email) => request('/api/auth/forgot-password', { method: 'POST', body: { email } }),
     resetPassword: (payload) => request('/api/auth/reset-password', { method: 'POST', body: payload }),
+    // Irréversible : supprime le compte et toutes les données associées (RGPD).
+    deleteAccount: (password) => request('/api/auth/account', { method: 'DELETE', body: { password } }),
   },
 
   properties: {

@@ -1,7 +1,7 @@
 /**
  * Gmail Controller — OAuth flow, account management & message sync triggers
  */
-const { sanitizeEmail } = require('../utils/sanitize');
+const { sanitizeEmail, escapeHtml, validateId } = require('../utils/sanitize');
 const logger = require('../utils/logger');
 const gmailSync = require('../services/gmailSyncService');
 const { getDatabase } = require('../config/db');
@@ -54,11 +54,24 @@ async function oauthCallback(req, res) {
   const error = req.query.error;
   const state = req.query.state;
 
-  // Helper to render result page
+  // Helper to render result page.
+  //
+  // `message` is trusted markup written by this file (some variants carry
+  // links). Anything coming from the request or from Google is escaped by the
+  // CALLER with escapeHtml() before it gets here: this endpoint is reachable
+  // without a session, and ?error= is fully attacker-controlled, so
+  // interpolating it raw turned a crafted link into stored-free reflected XSS
+  // on the app's own origin.
   function renderPage(title, message, isError) {
     const color = isError ? '#d93025' : '#188038';
     const icon = isError ? '✕' : '✓';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // No inline script/style from user data ever reaches this page, and the CSP
+    // makes that structural rather than a promise.
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+    );
     res.send(`<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8"><title>${title}</title>
 <style>
@@ -72,13 +85,13 @@ async function oauthCallback(req, res) {
   <div class="icon">${icon}</div>
   <h2>${title}</h2>
   <p class="msg">${message}</p>
-  ${isError ? '' : '<p>Redirection dans 2 secondes...</p><script>setTimeout(()=>window.location.href="/index.html#integrations",2000)</script>'}
+  ${isError ? '' : '<p>Redirection dans 2 secondes...</p><script>setTimeout(()=>window.location.href="/integrations",2000)</script>'}
 </div></body></html>`);
   }
 
   if (error) {
     logger.warn('Gmail OAuth error from Google:', error);
-    return renderPage('Erreur OAuth', `Google a retourné une erreur : ${error}`, true);
+    return renderPage('Erreur OAuth', `Google a retourné une erreur : ${escapeHtml(String(error))}`, true);
   }
 
   if (!code) {
@@ -99,16 +112,27 @@ async function oauthCallback(req, res) {
   }
 
   try {
-    const { email, accessToken, refreshToken, expiresAt } = await gmailSync.exchangeCode(code);
+    // grantedScopes/canSend are the whole point of the consent round-trip and
+    // were being dropped here: exchangeCode() returns them, this destructuring
+    // did not take them, so saveGmailAccount() stored can_send = 0 on EVERY
+    // authorization — including one where the user had just granted
+    // gmail.send. That is why the Automations page kept saying "votre compte
+    // Gmail n'autorise pas encore l'envoi, cliquez Réautoriser" and why
+    // re-authorizing never cleared it: the flag could only ever be repaired
+    // later, as a side effect of a token refresh.
+    const { email, accessToken, refreshToken, expiresAt, grantedScopes, canSend } =
+      await gmailSync.exchangeCode(code);
 
     const accountId = await gmailSync.saveGmailAccount(userId, {
       email: sanitizeEmail(email),
       accessToken,
       refreshToken,
-      expiresAt
+      expiresAt,
+      grantedScopes,
+      canSend
     });
 
-    logger.info(`Gmail account added: ${email} for user ${userId}`);
+    logger.info(`Gmail account added: ${email} for user ${userId} (envoi autorisé: ${canSend ? 'oui' : 'non'})`);
 
     // Kick off the first sync WITHOUT blocking the OAuth redirect.
     // A first-time sync walks every Airbnb thread in the mailbox and can run
@@ -153,13 +177,17 @@ async function handleCallback(req, res) {
       return res.status(400).json({ error: 'Authorization code requis' });
     }
 
-    const { email, accessToken, refreshToken, expiresAt } = await gmailSync.exchangeCode(code);
+    // Same scope-dropping bug as oauthCallback — see the comment there.
+    const { email, accessToken, refreshToken, expiresAt, grantedScopes, canSend } =
+      await gmailSync.exchangeCode(code);
 
     const accountId = await gmailSync.saveGmailAccount(req.userId, {
       email: sanitizeEmail(email),
       accessToken,
       refreshToken,
-      expiresAt
+      expiresAt,
+      grantedScopes,
+      canSend
     });
 
     await logAudit(req, 'gmail_account_added', 'gmail_account', accountId);
@@ -183,7 +211,8 @@ async function handleCallback(req, res) {
  */
 async function reauthorize(req, res) {
   try {
-    const accountId = parseInt(req.params.accountId, 10);
+    const accountId = validateId(req.params.accountId);
+    if (!accountId) return res.status(400).json({ error: 'Identifiant de compte invalide' });
     const db = getDatabase();
     const rows = await db.query(
       'SELECT id, email FROM gmail_accounts WHERE id = ? AND user_id = ? AND is_active = TRUE',
@@ -232,11 +261,18 @@ async function getAccounts(req, res) {
  */
 async function removeAccount(req, res) {
   try {
-    const accountId = parseInt(req.params.id);
-    await gmailSync.deactivateAccount(req.userId, accountId);
+    // parseInt('abc') is NaN, which silently matched nothing and still reported
+    // success — the card stayed on screen and "Déconnecter" looked broken.
+    const accountId = validateId(req.params.id);
+    if (!accountId) return res.status(400).json({ error: 'Identifiant de compte invalide' });
+
+    const removed = await gmailSync.deactivateAccount(req.userId, accountId);
+    if (!removed) {
+      return res.status(404).json({ error: 'Compte Gmail introuvable' });
+    }
     await logAudit(req, 'gmail_account_removed', 'gmail_account', accountId);
 
-    return res.json({ success: true, message: 'Compte Gmail supprimé' });
+    return res.json({ success: true, message: 'Compte Gmail déconnecté' });
   } catch (error) {
     logger.error('Remove Gmail account error:', error);
     return res.status(500).json({ error: 'Erreur lors de la suppression du compte Gmail' });
@@ -253,7 +289,8 @@ async function removeAccount(req, res) {
  */
 async function syncMessages(req, res) {
   try {
-    const accountId = parseInt(req.params.accountId);
+    const accountId = validateId(req.params.accountId);
+    if (!accountId) return res.status(400).json({ error: 'Identifiant de compte invalide' });
     // ?force=true → ignore last_sync_at, re-fetch everything (useful to recover missed messages)
     const forceFullSync = req.query.force === 'true' || req.body?.force === true;
     if (forceFullSync) {

@@ -23,6 +23,7 @@ const queue = require('./outboundQueue');
 const policy = require('./autoReplyPolicy');
 const { resolveReplyContext, getLatestGuestMessage } = require('./replyContextService');
 const { generateDraftReply } = require('./aiService');
+const { getHostStyle } = require('./hostStyleService');
 
 /**
  * Read the effective settings for a conversation.
@@ -175,6 +176,32 @@ async function prepareQueuedReply(row) {
     .reverse();
   const incomingMessage = burst.map((m) => m.content).join('\n\n').trim();
 
+  // The host's own writing style, learned from THEIR past outgoing messages
+  // (hostStyleService scopes every query by user_id, so one host's voice can
+  // never leak into another's reply).
+  //
+  // Only the manual "Générer un message IA" button used to load this: the
+  // automatic path never passed hostStyle, so Michel answered in the generic
+  // default voice precisely when the host was not there to correct it — the
+  // opposite of what automation is for. A failure here must not cancel the
+  // reply, it just costs the personalisation.
+  let hostStyle = null;
+  try {
+    hostStyle = await getHostStyle(row.user_id);
+  } catch (err) {
+    logger.warn(`Style de l'hôte indisponible pour l'utilisateur ${row.user_id} : ${err.message}`);
+  }
+
+  // The real state of the booking, not a hardcoded 'inquiry'. Answering a
+  // confirmed guest — or someone already checked in — as though they were still
+  // a prospect asking about the listing is jarring and often plainly wrong.
+  let bookingStatus = 'inquiry';
+  const convRows = await db.query(
+    'SELECT booking_status FROM conversations WHERE id = ? AND user_id = ?',
+    [row.conversation_id, row.user_id]
+  );
+  if (convRows[0]?.booking_status) bookingStatus = convRows[0].booking_status;
+
   // Property context for the model.
   let propertyContext = {};
   let airbnbListingId = null;
@@ -205,8 +232,9 @@ async function prepareQueuedReply(row) {
       incomingMessage,
       propertyContext,
       conversationHistory: history,
-      bookingStatus: 'inquiry',
+      bookingStatus,
       airbnbListingId,
+      hostStyle,
     });
   } catch (err) {
     return { send: false, decision: { code: 'ai_error', reason: `Génération impossible : ${err.message}` } };
