@@ -65,14 +65,14 @@ function buildProductionConfig() {
   }
 
   // Valider les variables obligatoires — échoue tôt avec un message clair
-  const required = ['DB_HOST', 'DB_USER', 'DB_NAME'];
+  const required = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
   const missing  = required.filter(k => !process.env[k]);
   if (missing.length > 0) {
     console.error('');
     console.error('FATAL: Missing required database environment variables in production:');
     console.error(`  Missing: ${missing.join(', ')}`);
     console.error('');
-    console.error('Set these variables in your Render dashboard > Environment.');
+    console.error('Set these variables in your Render/Railway dashboard > Variables.');
     console.error('To use SQLite instead, set USE_MEMORY_DB=true.');
     console.error('');
     process.exit(1);
@@ -85,7 +85,7 @@ function buildProductionConfig() {
     return {
       client: 'mysql2',
       connection: {
-        connectionString: process.env.DATABASE_URL,
+        uri: process.env.DATABASE_URL,
         ssl: sslEnabled ? { rejectUnauthorized: false } : undefined
       },
       pool: MYSQL_POOL,
@@ -99,7 +99,7 @@ function buildProductionConfig() {
       host:     process.env.DB_HOST,
       port:     parseInt(process.env.DB_PORT, 10) || 3306,
       user:     process.env.DB_USER,
-      password: process.env.DB_PASSWORD || '',
+      password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       charset:  'utf8mb4',
       // SSL requis pour la plupart des bases cloud (PlanetScale, Aiven, etc.)

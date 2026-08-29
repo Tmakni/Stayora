@@ -67,10 +67,13 @@ app.use(helmet({
 }));
 
 // CORS — strict origin control
-// Render auto-sets RENDER_EXTERNAL_URL; APP_URL can override for custom domains
+// Render auto-sets RENDER_EXTERNAL_URL; Railway auto-sets RAILWAY_PUBLIC_DOMAIN
+// (bare hostname, no scheme — Railway public domains are always https).
+// APP_URL can override for custom domains.
 const _prodOrigins = [
   process.env.APP_URL,
   process.env.RENDER_EXTERNAL_URL,
+  process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`,
 ].filter(Boolean).map(o => o.replace(/\/$/, ''));
 // In development the app is also opened from a phone on the same Wi-Fi
 // (`npm run dev:mobile`), so the browser's Origin is the machine's LAN address
