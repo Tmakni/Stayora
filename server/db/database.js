@@ -62,6 +62,9 @@ async function runMigrations() {
     }
   } catch (err) {
     logger.error('Migration error:', err.message);
+    // Tag the stage so initDatabase() can tell a migration failure apart from
+    // a connection failure — the two need completely different fixes.
+    err.stage = 'migration';
     throw err;
   }
 }

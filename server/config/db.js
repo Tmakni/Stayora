@@ -23,11 +23,15 @@ async function initDatabase() {
   } catch (error) {
     const isProd    = (process.env.NODE_ENV || 'development') === 'production';
     const useMemory = process.env.USE_MEMORY_DB === 'true';
+    // testConnection() proves the link with SELECT 1 BEFORE running any
+    // migration, so an error tagged 'migration' failed after the database was
+    // already reachable — the credentials are not the problem.
+    const isMigration = error.stage === 'migration';
 
-    logger.error('Database initialization failed:', error.message);
+    logger.error(`Database ${isMigration ? 'migration' : 'connection'} failed:`, error.message);
 
     // Log non-sensitive diagnostics to help diagnose cloud DB issues
-    if (isProd && !useMemory) {
+    if (isProd && !useMemory && !isMigration) {
       logger.error('--- DB connection diagnostics (no secrets logged) ---');
       logger.error(`  DB_HOST  : ${process.env.DB_HOST  ? 'set' : 'MISSING'}`);
       logger.error(`  DB_USER  : ${process.env.DB_USER  ? 'set' : 'MISSING'}`);
@@ -38,9 +42,11 @@ async function initDatabase() {
       logger.error('----------------------------------------------------');
     }
 
-    const friendlyMessage = isProd && !useMemory
-      ? `Database connection failed. Check DB_HOST, DB_USER, DB_PASSWORD, DB_NAME and DB_SSL settings in your Render environment variables. Original error: ${error.message}`
-      : error.message;
+    const friendlyMessage = isMigration
+      ? `Database migration failed — the connection itself is working. Fix the failing migration, then redeploy. Original error: ${error.message}`
+      : isProd && !useMemory
+        ? `Database connection failed. Check DB_HOST, DB_USER, DB_PASSWORD, DB_NAME and DB_SSL settings in your Render/Railway environment variables. Original error: ${error.message}`
+        : error.message;
 
     throw new Error(friendlyMessage);
   }
