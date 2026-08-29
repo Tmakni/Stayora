@@ -315,6 +315,46 @@ async function syncMessages(req, res) {
   }
 }
 
+/**
+ * POST /api/gmail/reconcile/:accountId
+ * Re-read threads already attached to a conversation and import whatever is
+ * missing, ignoring the incremental window.
+ *
+ * The scheduler runs this continuously in the background; this endpoint exists
+ * so a host who can SEE a gap ("Airbnb shows twelve messages, the app shows
+ * four") can close it now instead of waiting for the rotation to come round.
+ * `?limit=` raises the batch for a one-off catch-up.
+ */
+async function reconcileMessages(req, res) {
+  try {
+    const accountId = validateId(req.params.accountId);
+    if (!accountId) return res.status(400).json({ error: 'Identifiant de compte invalide' });
+
+    const requested = parseInt(req.query.limit, 10);
+    // Bounded: each thread is one threads.get against Gmail's per-user quota.
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 500) : 100;
+
+    const result = await gmailSync.reconcileThreads(req.userId, accountId, { limit });
+    await logAudit(req, 'gmail_reconcile_threads', 'gmail_account', accountId);
+
+    return res.json({
+      success: true,
+      message: result.recovered > 0
+        ? `${result.recovered} message(s) récupéré(s) sur ${result.threads} fil(s) relus`
+        : `${result.threads} fil(s) relus, aucun message manquant`,
+      ...result,
+    });
+  } catch (error) {
+    logger.error('Gmail reconcile error:', error);
+
+    if (error.message === 'GMAIL_TOKEN_EXPIRED') {
+      return res.status(401).json({ error: 'Token Gmail expiré. Veuillez reconnecter le compte.' });
+    }
+
+    return res.status(500).json({ error: 'Erreur lors du rattrapage des messages' });
+  }
+}
+
 // ================================================================
 // Helpers
 // ================================================================
@@ -361,5 +401,6 @@ module.exports = {
   reauthorize,
   removeAccount,
   syncMessages,
+  reconcileMessages,
   purgeNonAirbnb
 };

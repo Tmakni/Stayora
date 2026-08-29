@@ -22,6 +22,10 @@ router.delete('/accounts/:id', gmailController.removeAccount);
 
 // ---- Sync triggers ----
 router.post('/sync/:accountId', gmailController.syncMessages);
+// Rattrapage : relit les fils déjà connus hors de la fenêtre incrémentale et
+// importe ce qui manque. Le planificateur le fait déjà en continu ; cette route
+// permet de le déclencher immédiatement sur une conversation visiblement trouée.
+router.post('/reconcile/:accountId', gmailController.reconcileMessages);
 
 // ---- Cleanup ----
 router.delete('/purge-non-airbnb', gmailController.purgeNonAirbnb);

@@ -20,6 +20,18 @@
  */
 
 const { INTENTS } = require('./intentClassifier');
+const { isCourtesyOnly, hasUnfilledPlaceholder } = require('./replyGuard');
+const { evaluateClosure } = require('./conversationClosure');
+
+/**
+ * Minimum self-reported confidence for an unattended send.
+ *
+ * Absence of a confidence value is NOT treated as confidence: a result that
+ * never reported one (an old cached shape, a template fallback, a model that
+ * ignored the schema) is refused. "Nothing to report" and "certain" must not
+ * collapse into the same outcome on the path that talks to guests.
+ */
+const MIN_CONFIDENCE = 0.85;
 
 /** Modes stored on users.auto_reply_mode / property_profiles.auto_reply_mode. */
 const MODES = {
@@ -164,6 +176,8 @@ function resolveMode({ userMode, propertyMode, paused }) {
  * @param {string} [input.userMode]           users.auto_reply_mode
  * @param {string} [input.propertyMode]       property_profiles.auto_reply_mode
  * @param {boolean} [input.paused]            users.auto_reply_paused
+ * @param {Array}  [input.recentMessages]     newest-first rows, for closure detection
+ * @param {string} [input.bookingStatus]      conversations.booking_status
  * @returns {{allowed: boolean, mode: string, reason: string, code: string}}
  */
 function evaluateAutoReply({
@@ -172,6 +186,8 @@ function evaluateAutoReply({
   userMode = MODES.MANUAL,
   propertyMode = null,
   paused = false,
+  recentMessages = [],
+  bookingStatus = null,
 }) {
   const mode = resolveMode({ userMode, propertyMode, paused });
 
@@ -179,6 +195,22 @@ function evaluateAutoReply({
 
   if (paused) return deny('emergency_stop', "Arrêt d'urgence activé");
   if (mode !== MODES.AUTO) return deny('manual_mode', 'Mode validation manuelle');
+
+  // ── Is there anything left to answer? ───────────────────────────────────
+  // Checked before anything that reasons about the ANSWER: when the thread is
+  // over, the quality of the draft is beside the point.
+  const closure = evaluateClosure({ recent: recentMessages, bookingStatus });
+  if (closure.closed) {
+    return deny('conversation_closed', closure.reason);
+  }
+
+  // Deterministic courtesy net, independent of the model. The model is supposed
+  // to set no_reply_needed, but this path must not depend on it agreeing —
+  // answering "merci !" with a paragraph is the single most visible way an
+  // automated host reads as a robot.
+  if (isCourtesyOnly(incomingMessage)) {
+    return deny('courtesy_message', 'Simple message de politesse — aucune réponse nécessaire');
+  }
 
   // ── Model's own refusals ────────────────────────────────────────────────
   if (aiResult.no_reply_needed) return deny('no_reply_needed', 'Message de courtoisie, aucune réponse nécessaire');
@@ -193,10 +225,44 @@ function evaluateAutoReply({
   // usually also trips the sensitive-wording net (it tends to talk about
   // cancellations or transfers), and reporting "sujet sensible" there would
   // hide from the host that someone tried to take over the assistant.
+  //
+  // It also outranks the confidence and fallback gates below for the same
+  // reason: "l'IA n'a pas indiqué sa certitude" is a true statement about an
+  // injected message, and a useless one to show the host.
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(incomingMessage)) {
       return deny('prompt_injection', "Le message tente de manipuler l'assistant — validation requise");
     }
+  }
+
+  // ── Was this even produced by the model? ────────────────────────────────
+  // templateService fills a canned sentence with DEFAULTS when OpenAI is
+  // unavailable ("le check-in est prévu à partir de 15:00" — a number nobody
+  // configured). That is an invented fact in the host's voice, and every gate
+  // below would have waved it through: low risk, whitelisted intent, plausible
+  // length, no hedging. It stays available as a draft, never as a send.
+  if (aiResult.fallback === true) {
+    return deny('template_fallback', "L'IA était indisponible — réponse générique non envoyée");
+  }
+
+  // ── Confidence ──────────────────────────────────────────────────────────
+  // "Not sure" and "did not say" are both refusals here.
+  //
+  // The range check is not defensive decoration: a value outside 0–1 is a value
+  // this gate cannot interpret, and `1.5 >= MIN_CONFIDENCE` would otherwise read
+  // as extra certainty and wave the reply through. A model that reports its
+  // confidence on a scale nobody asked for has told us nothing usable.
+  const raw = aiResult.confidence;
+  const confidence =
+    typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : null;
+  if (confidence === null) {
+    return deny('confidence_missing', "L'IA n'a pas indiqué son niveau de certitude");
+  }
+  if (confidence < MIN_CONFIDENCE) {
+    return deny(
+      'low_confidence',
+      `Certitude insuffisante (${Math.round(confidence * 100)} % < ${Math.round(MIN_CONFIDENCE * 100)} %)`
+    );
   }
 
   // ── Topic gates ─────────────────────────────────────────────────────────
@@ -228,6 +294,12 @@ function evaluateAutoReply({
     }
   }
 
+  // A field the model never filled in. Shared with the webhook path so both
+  // send routes reject "[À FOURNIR]", "{{wifi}}" and "%tracking%" identically.
+  if (hasUnfilledPlaceholder(reply)) {
+    return deny('unfilled_placeholder', 'La réponse contient un champ non complété');
+  }
+
   // Last line of defence, on the outgoing text itself: bank details, wallets or
   // a push to move the conversation off-platform never go out unattended, no
   // matter how the model came to write them.
@@ -246,7 +318,7 @@ function evaluateAutoReply({
   return {
     allowed: true,
     mode,
-    reason: `Sujet factuel (${intent}), informations disponibles`,
+    reason: `Sujet factuel (${intent}), certitude ${Math.round(confidence * 100)} %`,
     code: 'auto_ok',
   };
 }
@@ -261,6 +333,7 @@ module.exports = {
   REPLY_EXFIL_PATTERNS,
   MIN_REPLY_CHARS,
   MAX_REPLY_CHARS,
+  MIN_CONFIDENCE,
   resolveMode,
   evaluateAutoReply,
 };

@@ -8,6 +8,7 @@ const logger = require('../utils/logger');
 const { buildSystemPrompt, buildUserPrompt, buildFineTunedPrompt } = require('./promptBuilder');
 const { classifyIntent, assessRisk, shouldEscalate } = require('./intentClassifier');
 const { buildFallbackResponse } = require('./templateService');
+const { isCourtesyOnly } = require('./replyGuard');
 
 /**
  * Clean AI reply tone: fix robotic patterns like "Bonjour!" and excessive exclamation marks.
@@ -279,12 +280,33 @@ async function generateWithOpenAI({
     escalate: parsed.escalate === true,
     needs_host: parsed.needs_host === true,
     no_reply_needed: parsed.no_reply_needed === true,
+    // Left null when the model omitted it or returned something unusable. The
+    // policy refuses a null just as firmly as a low value — a missing signal is
+    // not a good one.
+    confidence: parseConfidence(parsed.confidence),
     host_note: parsed.host_note || null,
     host_question: parsed.host_question || null,
-    missing_info_questions: Array.isArray(parsed.missing_info_questions) 
-      ? parsed.missing_info_questions.slice(0, 3) 
+    missing_info_questions: Array.isArray(parsed.missing_info_questions)
+      ? parsed.missing_info_questions.slice(0, 3)
       : []
   };
+}
+
+/**
+ * Read the model's self-reported certainty as a 0–1 number.
+ *
+ * Accepts the percentage form too ("95", 95) because models drift between the
+ * two, but anything that is not a finite number in range becomes null rather
+ * than being coerced to a value the model never meant.
+ */
+function parseConfidence(raw) {
+  let value = raw;
+  if (typeof value === 'string') value = value.trim().replace('%', '');
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  if (num > 1 && num <= 100) return num / 100;
+  if (num < 0 || num > 1) return null;
+  return num;
 }
 
 /**
@@ -331,6 +353,7 @@ async function generateWithFineTuned({
       escalate: shouldEscalate(fallbackIntent, fallbackRisk, incomingMessage.length),
       needs_host: true,
       no_reply_needed: false,
+      confidence: null,
       host_note: null,
       host_question: 'Le modèle n\'a pas pu générer de réponse.',
       missing_info_questions: []
@@ -342,17 +365,30 @@ async function generateWithFineTuned({
   const risk = fallbackRisk;
   const escalate = shouldEscalate(intent, risk, incomingMessage.length);
 
-  // Detect courtesy messages that don't need a reply
-  const courtesyPatterns = /^(merci|ok|d'accord|super|parfait|top|cool|nickel|genial|génial|bonne journée|bonne soirée|bonsoir|thanks|thank you|great|perfect|awesome|noted|got it|okay|ok merci|merci beaucoup|super merci|parfait merci|c'est noté|c'est parfait|tres bien|très bien)[.!\s]*$/i;
-  const noReply = courtesyPatterns.test(incomingMessage.trim());
+  // Courtesy detection is delegated to the shared deterministic net, which
+  // handles a BURST ("merci\n\nbonne journée") — the anchored ^…$ pattern that
+  // used to live here matched a single message only, so the automatic path,
+  // which concatenates the guest's burst before generating, never recognised
+  // one and answered a string of thank-yous with a paragraph.
+  const noReply = isCourtesyOnly(incomingMessage);
 
   return {
     draft_reply: noReply ? '' : cleanReplyTone(replyText),
     intent,
     risk_level: risk,
     escalate,
-    needs_host: false,
+    // A plain-text model reports nothing about itself. `needs_host: false` was
+    // asserted here on its behalf, which silently switched OFF the "never
+    // invent an answer" gate for the whole fine-tuned configuration: the model
+    // could state a check-in time that exists nowhere in the property sheet and
+    // the policy would see an explicit "no information missing".
+    //
+    // Undefined is the truthful value — it means "not reported", and with a
+    // null confidence the policy keeps these as drafts for the host rather than
+    // sending text nothing has verified.
+    needs_host: undefined,
     no_reply_needed: noReply,
+    confidence: null,
     host_note: null,
     host_question: null,
     missing_info_questions: []

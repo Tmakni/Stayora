@@ -29,15 +29,45 @@ const EMOJI_OR_PUNCT_ONLY = /^[\s\p{Emoji_Presentation}\p{Extended_Pictographic}
 /**
  * Un message de simple politesse n'attend pas de réponse.
  * On ne se fie pas au seul jugement du modèle.
+ *
+ * Les rafales sont traitées message par message : le chemin automatique
+ * concatène la salve du voyageur ("merci\n\nbonne journée") avant d'appeler la
+ * politique, et un motif ancré `^…$` sur la chaîne entière ne reconnaissait
+ * alors plus rien. Une salve n'appelle de réponse que si AU MOINS UN de ses
+ * messages en appelle une.
  */
 function isCourtesyOnly(message) {
   if (typeof message !== 'string') return false;
   const trimmed = message.trim();
   if (!trimmed) return true;
+
+  const parts = trimmed
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length > 1) {
+    return parts.every((part) => isCourtesyOnly(part));
+  }
+
   // Au-delà de quelques mots, ce n'est plus une simple formule de politesse
   // ("merci, par contre le chauffage ne marche pas" doit obtenir une réponse).
   if (trimmed.length > 40) return false;
   return COURTESY_ONLY.test(trimmed) || EMOJI_OR_PUNCT_ONLY.test(trimmed);
+}
+
+/**
+ * Le modèle a laissé un champ à compléter — ne jamais l'envoyer tel quel.
+ *
+ * Attrape aussi les gabarits de repli de templateService, qui remplacent une
+ * information absente par « [À FOURNIR] » : sans ce filet, une panne d'OpenAI
+ * faisait partir au voyageur un message affirmant un code d'accès « [À
+ * FOURNIR] » — ou pire, une heure de check-in inventée.
+ */
+const PLACEHOLDER_PATTERN = /\[[^\]]{2,40}\]|\{\{[^}]+\}\}|%[a-z_]+%|XXXX|À COMPLÉTER|A COMPLETER|À FOURNIR|A FOURNIR|TODO/i;
+
+function hasUnfilledPlaceholder(draft) {
+  return PLACEHOLDER_PATTERN.test(String(draft || ''));
 }
 
 /**
@@ -94,8 +124,16 @@ function shouldAutoSend(aiResult, { incomingMessage = '', autoReplyEnabled = fal
   }
 
   // Le modèle a laissé un marqueur à compléter — ne jamais l'envoyer tel quel
-  if (/\[[^\]]{2,40}\]|\{\{[^}]+\}\}|XXXX|À COMPLÉTER|TODO/i.test(draft)) {
+  if (hasUnfilledPlaceholder(draft)) {
     return { allowed: false, reason: 'unfilled_placeholder' };
+  }
+
+  // Réponse produite par un gabarit de repli (OpenAI indisponible) : ce n'est
+  // pas une réponse à la question du voyageur, c'est un texte générique avec
+  // des valeurs par défaut. Il reste utile comme brouillon pour l'hôte, jamais
+  // comme envoi automatique.
+  if (aiResult.fallback === true) {
+    return { allowed: false, reason: 'template_fallback' };
   }
 
   return { allowed: true, reason: 'ok' };
@@ -113,6 +151,7 @@ const REASON_LABELS = {
   empty_draft: 'La réponse générée était vide.',
   draft_too_short: 'La réponse générée était trop courte pour être fiable.',
   unfilled_placeholder: 'La réponse générée contenait un champ non complété.',
+  template_fallback: "L'IA était indisponible — réponse générique non envoyée.",
   ok: 'Envoyée automatiquement.',
 };
 
@@ -120,4 +159,10 @@ function describeReason(reason) {
   return REASON_LABELS[reason] || reason;
 }
 
-module.exports = { shouldAutoSend, isCourtesyOnly, describeReason };
+module.exports = {
+  shouldAutoSend,
+  isCourtesyOnly,
+  hasUnfilledPlaceholder,
+  describeReason,
+  PLACEHOLDER_PATTERN,
+};

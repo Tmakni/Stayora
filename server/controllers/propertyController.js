@@ -1,6 +1,7 @@
 const { getDatabase } = require('../config/db');
 const logger = require('../utils/logger');
 const { isPlaceholderName } = require('../services/airbnbListingResolver');
+const { validateId, validateDateString } = require('../utils/sanitize');
 
 /**
  * Does this DB error mean "a row with these unique values already exists"?
@@ -818,6 +819,13 @@ async function getCalendar(req, res) {
     const from = req.query.from || new Date().toISOString().slice(0, 10);
     const to = req.query.to || new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
 
+    // The range goes straight into date comparisons. A malformed bound does not
+    // error — it silently matches nothing, and the host reads an empty calendar
+    // as "no bookings" rather than "bad request".
+    if (!validateDateString(from) || !validateDateString(to)) {
+      return res.status(400).json({ error: 'Paramètres from/to attendus au format YYYY-MM-DD' });
+    }
+
     const db = getDatabase();
 
     // Check ownership
@@ -886,11 +894,24 @@ async function getCalendar(req, res) {
  */
 async function addCalendarBlock(req, res) {
   try {
-    const { id } = req.params;
+    const id = validateId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Identifiant de propriété invalide' });
     const { start_date, end_date, reason, guest_name, notes } = req.body;
 
     if (!start_date || !end_date) {
       return res.status(400).json({ error: 'start_date et end_date requis' });
+    }
+    // Shape check BEFORE the ordering check.
+    //
+    // `new Date('n_importe_quoi')` is an Invalid Date, and every comparison
+    // against NaN is false — so `end_date <= start_date` was false for garbage
+    // input and the guard waved it straight through into a DATE column. SQLite
+    // stores whatever it is given, so the row then took part in the calendar's
+    // lexical range comparisons, and availabilityReply feeds those results to
+    // the model: a malformed block could make Michel tell a guest the place was
+    // free when it was not.
+    if (!validateDateString(start_date) || !validateDateString(end_date)) {
+      return res.status(400).json({ error: 'Dates attendues au format YYYY-MM-DD' });
     }
     if (new Date(end_date) <= new Date(start_date)) {
       return res.status(400).json({ error: 'end_date doit être après start_date' });

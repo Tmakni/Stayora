@@ -197,7 +197,7 @@ describe('auto-reply policy', () => {
   it('allows a factual answer when automatic mode is on', () => {
     const verdict = policy.evaluateAutoReply({
       incomingMessage: 'Bonjour, à quelle heure est le check-in ?',
-      aiResult: { intent: 'check-in', risk_level: 'low', draft_reply: factualReply },
+      aiResult: { intent: 'check-in', risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
       userMode: 'auto',
     });
     expect(verdict.allowed).toBe(true);
@@ -206,7 +206,7 @@ describe('auto-reply policy', () => {
   it('never sends automatically while in manual mode', () => {
     expect(policy.evaluateAutoReply({
       incomingMessage: 'code wifi ?',
-      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply },
+      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
       userMode: 'manual',
     })).toMatchObject({ allowed: false, code: 'manual_mode' });
   });
@@ -214,7 +214,7 @@ describe('auto-reply policy', () => {
   it('the emergency stop overrides everything', () => {
     expect(policy.evaluateAutoReply({
       incomingMessage: 'code wifi ?',
-      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply },
+      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
       userMode: 'auto',
       paused: true,
     })).toMatchObject({ allowed: false, code: 'emergency_stop' });
@@ -223,7 +223,7 @@ describe('auto-reply policy', () => {
   it('a property set to manual overrides the global automatic setting', () => {
     expect(policy.evaluateAutoReply({
       incomingMessage: 'code wifi ?',
-      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply },
+      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
       userMode: 'auto',
       propertyMode: 'manual',
     }).allowed).toBe(false);
@@ -250,7 +250,7 @@ describe('auto-reply policy', () => {
     // Classified as "wifi", but the guest is really asking for money back.
     const verdict = policy.evaluateAutoReply({
       incomingMessage: "Le wifi ne marche pas, je demande un remboursement",
-      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply },
+      aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
       userMode: 'auto',
     });
     expect(verdict).toMatchObject({ allowed: false, code: 'sensitive_wording' });
@@ -264,7 +264,7 @@ describe('auto-reply policy', () => {
     ]) {
       expect(policy.evaluateAutoReply({
         incomingMessage: 'Une question',
-        aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, [field]: true },
+        aiResult: { intent: 'wifi', risk_level: 'low', draft_reply: factualReply, [field]: true, confidence: 0.95 },
         userMode: 'auto',
       })).toMatchObject({ allowed: false, code });
     }
@@ -274,7 +274,7 @@ describe('auto-reply policy', () => {
     for (const risk of ['medium', 'high']) {
       expect(policy.evaluateAutoReply({
         incomingMessage: 'Une question',
-        aiResult: { intent: 'wifi', risk_level: risk, draft_reply: factualReply },
+        aiResult: { intent: 'wifi', risk_level: risk, draft_reply: factualReply, confidence: 0.95 },
         userMode: 'auto',
       }).allowed).toBe(false);
     }
@@ -290,7 +290,7 @@ describe('auto-reply policy', () => {
     for (const reply of hedges) {
       expect(policy.evaluateAutoReply({
         incomingMessage: 'Le parking est où ?',
-        aiResult: { intent: 'parking', risk_level: 'low', draft_reply: reply },
+        aiResult: { intent: 'parking', risk_level: 'low', draft_reply: reply, confidence: 0.95 },
         userMode: 'auto',
       }).allowed).toBe(false);
     }
@@ -301,7 +301,7 @@ describe('auto-reply policy', () => {
     for (const reply of ['', '   ', 'Oui.', long]) {
       expect(policy.evaluateAutoReply({
         incomingMessage: 'Le parking est où ?',
-        aiResult: { intent: 'parking', risk_level: 'low', draft_reply: reply },
+        aiResult: { intent: 'parking', risk_level: 'low', draft_reply: reply, confidence: 0.95 },
         userMode: 'auto',
       }).allowed).toBe(false);
     }
@@ -311,7 +311,7 @@ describe('auto-reply policy', () => {
     for (const intent of ['other', 'booking-inquiry']) {
       expect(policy.evaluateAutoReply({
         incomingMessage: 'Bonjour, une question générale sur le séjour',
-        aiResult: { intent, risk_level: 'low', draft_reply: factualReply },
+        aiResult: { intent, risk_level: 'low', draft_reply: factualReply, confidence: 0.95 },
         userMode: 'auto',
       })).toMatchObject({ allowed: false, code: 'intent_not_whitelisted' });
     }

@@ -301,8 +301,27 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
   try {
     const gmail = getGmailClient(account.access_token, account.refresh_token);
 
-    // Fetch ALL Airbnb notification emails (no in:inbox — catches archived/filtered)
-    let q = 'from:airbnb';
+    // The watermark is stamped from the moment the run STARTED, never from the
+    // moment it finished.
+    //
+    // finishSyncLog used to write `last_sync_at = NOW()` after the thread loop,
+    // so the next incremental window opened where this run ENDED. Everything
+    // that arrived while the run was working — and a first sync over a few
+    // thousand mails takes minutes, one threads.get per thread in batches of 5 —
+    // fell between the two windows and was never listed again. The 5-minute
+    // buffer hid it only for syncs that finished within 5 minutes.
+    const syncStartedAt = new Date();
+
+    // Fetch ALL Airbnb notification emails.
+    //
+    //   in:anywhere  Gmail's list endpoints exclude SPAM and TRASH by default,
+    //                and Airbnb notifications do land in spam, silently — a
+    //                host cannot answer a message the sync refuses to look at.
+    //   -in:trash    but the trash is a DELIBERATE act. Re-importing what the
+    //                host threw away (and resurrecting the conversation it
+    //                belonged to on every sync) is not completeness, it is
+    //                refusing to take no for an answer.
+    let q = 'from:airbnb in:anywhere -in:trash';
     if (!forceFullSync && account.last_sync_at) {
       // 5-minute safety buffer to avoid missing messages during sync gaps
       const safetyBufferSeconds = 300;
@@ -345,6 +364,11 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
       [userId]
     );
 
+    // Any thread this run could not finish. A single one of these means the
+    // watermark must NOT move: the incremental window would jump over the
+    // thread we just failed on, and nothing would ever list it again.
+    let incompleteThreads = 0;
+
     // Fetch full thread data in parallel batches (each threads.get returns ALL messages)
     const BATCH_SIZE = 5;
     const threadMap = new Map(); // threadId → [gmailMsg, …]
@@ -361,7 +385,10 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
         })
       ));
       for (const res of results) {
-        if (!res || !res.data || !res.data.messages) continue;
+        if (!res || !res.data || !res.data.messages) {
+          incompleteThreads++;
+          continue;
+        }
         const threadId = res.data.id;
         const msgCount = res.data.messages.length;
         logger.info(`Gmail sync: thread ${threadId} has ${msgCount} message(s)`);
@@ -385,6 +412,7 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
         synced += count;
         if (count === 0) skipped++;
       } catch (threadErr) {
+        incompleteThreads++;
         logger.warn(`Gmail sync thread ${threadId} failed: ${threadErr.message}`);
       }
     }
@@ -394,8 +422,12 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
     }
 
     logger.info(`Gmail sync: DONE — ${synced} new messages saved, ${skipped} threads skipped (no new messages)`);
-    await finishSyncLog(db, syncLogId, synced, accountId);
-    return { synced, threads: threadMap.size };
+    await finishSyncLog(db, syncLogId, synced, accountId, {
+      watermark: syncStartedAt,
+      complete: incompleteThreads === 0,
+      incompleteThreads,
+    });
+    return { synced, threads: threadMap.size, incompleteThreads };
   } catch (error) {
     await db.query(
       'UPDATE sync_logs SET status = ?, error_message = ?, completed_at = NOW() WHERE id = ?',
@@ -430,6 +462,108 @@ async function fetchMessages(userId, accountId, forceFullSync = false) {
     }
     throw error;
   }
+}
+
+/**
+ * Reconciliation pass — re-read threads we already know and import whatever is
+ * missing, ignoring the incremental window entirely.
+ *
+ * The incremental sync is a *recall* mechanism: it finds threads whose newest
+ * message is inside the `after:` window. Everything about completeness rests on
+ * that window never being wrong — and it can be wrong for reasons no amount of
+ * care inside one run removes: a Gmail 5xx on a single threads.get, a deploy
+ * restarting the process mid-run, a token refreshed halfway, clock skew between
+ * the app and Gmail, a message Gmail back-dates into a window that has closed.
+ * When it is wrong, the messages are not late — they are gone, because nothing
+ * ever lists that thread again.
+ *
+ * This pass removes that class of failure instead of narrowing it. It walks
+ * gmail_threads (the threads we have already attached to a conversation),
+ * re-fetches each one in full, and hands it to the same importer. Since
+ * syncGmailThread de-duplicates on gmail_message_id, re-reading a complete
+ * thread writes nothing; a thread with a hole fills in.
+ *
+ * Cost is bounded by design: oldest-reconciled-first, `limit` threads per run,
+ * so a large mailbox is covered over several passes rather than in one burst.
+ *
+ * @returns {Promise<{threads: number, recovered: number, failed: number}>}
+ */
+async function reconcileThreads(userId, accountId, { limit = 40 } = {}) {
+  const account = await getGmailAccount(userId, accountId);
+  if (!account) throw new Error('Gmail account not found');
+
+  const db = getDatabase();
+  const gmail = getGmailClient(account.access_token, account.refresh_token);
+
+  // Least-recently-reconciled first, so every thread comes round eventually
+  // instead of the same busy ones being re-read forever.
+  const rows = await db.query(
+    `SELECT gt.gmail_thread_id
+       FROM gmail_threads gt
+      WHERE gt.gmail_account_id = ? AND gt.user_id = ?
+      ORDER BY COALESCE(gt.reconciled_at, '1970-01-01') ASC, gt.id ASC
+      LIMIT ?`,
+    [accountId, userId, limit]
+  );
+  if (rows.length === 0) return { threads: 0, recovered: 0, failed: 0 };
+
+  const properties = await db.query(
+    'SELECT id, name, superhot_listing_id, context_json FROM property_profiles WHERE user_id = ?',
+    [userId]
+  );
+  const hostNames = loadHostNames(account);
+
+  let recovered = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    const threadId = row.gmail_thread_id;
+    try {
+      const res = await gmail.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
+      const msgs = res?.data?.messages || [];
+      if (msgs.length === 0) {
+        // The thread is gone from Gmail (deleted, or purged from trash). Stamp
+        // it so it stops being re-read on every pass.
+        await touchReconciled(db, accountId, threadId);
+        continue;
+      }
+
+      const added = await syncGmailThread(
+        userId, accountId, account, gmail, threadId, msgs, properties, hostNames
+      );
+      if (added > 0) {
+        recovered += added;
+        logger.info(`Réconciliation : ${added} message(s) récupéré(s) sur le fil ${threadId}`);
+      }
+      await touchReconciled(db, accountId, threadId);
+    } catch (err) {
+      failed++;
+      // 404 means the thread no longer exists — not worth retrying forever.
+      if (err?.code === 404 || err?.status === 404) {
+        await touchReconciled(db, accountId, threadId).catch(() => {});
+      }
+      logger.warn(`Réconciliation du fil ${threadId} impossible : ${err.message}`);
+    }
+  }
+
+  if (hostNames.size > 0) {
+    await persistHostNames(db, accountId, hostNames).catch(() => {});
+  }
+
+  if (recovered > 0 || failed > 0) {
+    logger.info(
+      `Réconciliation Gmail (compte ${accountId}) : ${rows.length} fil(s) relus, ` +
+      `${recovered} message(s) récupéré(s), ${failed} échec(s)`
+    );
+  }
+  return { threads: rows.length, recovered, failed };
+}
+
+async function touchReconciled(db, accountId, gmailThreadId) {
+  await db.query(
+    'UPDATE gmail_threads SET reconciled_at = NOW() WHERE gmail_account_id = ? AND gmail_thread_id = ?',
+    [accountId, gmailThreadId]
+  );
 }
 
 // ================================================================
@@ -765,10 +899,6 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     }
 
     const body = decodedBodies[mi] || '';
-    if (!body.trim()) {
-      logger.info(`Gmail sync: skipping message ${fullMsg.id} — empty body`);
-      continue;
-    }
 
     // For Airbnb emails, extract the guest message; for others, use full body
     let cleanedMessage = isAirbnb
@@ -779,9 +909,28 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
       logger.warn(`Gmail sync: Airbnb parser returned empty for ${fullMsg.id}, using raw body`);
       cleanedMessage = body.replace(/\n{3,}/g, '\n\n').trim();
     }
+
+    // A message we cannot read is still a message that EXISTS.
+    //
+    // Both "empty MIME body" and "parser returned nothing" used to `continue`,
+    // which dropped the row silently: nothing was stored, so nothing recorded
+    // that Gmail had ever delivered it. That is the bulk of what
+    // scripts/audit-missing-messages.js reports as `corps-vide` / `parser-vide`,
+    // and it is exactly the "il me manque 2 ou 3 messages par conversation"
+    // symptom — the thread reads as complete because the gaps leave no trace.
+    //
+    // Storing a placeholder instead keeps the thread whole: the host sees that
+    // something arrived and can open it in Gmail, the id is recorded so the
+    // message is not reconsidered on every later sync, and the reply headers
+    // (which live in the headers, not the body) are captured as usual.
+    let unreadable = null;
     if (!cleanedMessage.trim()) {
-      logger.info(`Gmail sync: skipping message ${fullMsg.id} — no extractable content`);
-      continue;
+      unreadable = body.trim() ? 'parser_empty' : 'empty_body';
+      const subjectHint = (parseHeaders(fullMsg).subject || '').trim();
+      cleanedMessage = subjectHint
+        ? `[Message Airbnb non lisible automatiquement — objet : ${subjectHint}]`
+        : '[Message Airbnb non lisible automatiquement — à consulter dans Gmail]';
+      logger.warn(`Gmail sync: message ${fullMsg.id} illisible (${unreadable}) — enregistré en l'état`);
     }
 
     const msgHeaders = parseHeaders(fullMsg);
@@ -833,7 +982,17 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     const emailMessageId = msgHeaders['message-id'] || null;
     const emailReferences = msgHeaders['references'] || null;
 
-    await db.query(
+    // The read-then-write above (existingMsgIds) is a decision made on a
+    // snapshot: another importer may insert this same message between that read
+    // and this write. Migration 020 makes the database refuse the second one —
+    // this catch is the other half, turning that refusal into the same "already
+    // known" outcome the in-memory check produces, instead of an exception that
+    // would abort the rest of the thread.
+    //
+    // Concretely: the sync cycle and the reconciliation pass read the same
+    // threads, and a Render deploy briefly runs two processes over one file.
+    try {
+      await db.query(
       `INSERT INTO messages
         (conversation_id, role, content, gmail_message_id,
          email_reply_to, email_message_id, email_references, email_subject,
@@ -856,18 +1015,34 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
           subject: msgHeaders.subject,
           date: msgHeaders.date,
           sender_name: displayName,
-          property_name: matchedProperty ? matchedProperty.name : propertyName
+          property_name: matchedProperty ? matchedProperty.name : propertyName,
+          ...(unreadable ? { unreadable } : {})
         }),
-        msgDate
-      ]
-    );
+          msgDate
+        ]
+      );
+    } catch (err) {
+      if (isDuplicateMessageError(err)) {
+        // Another importer won the race. Same outcome as finding it in the
+        // snapshot: count it as a duplicate and move on.
+        duplicates++;
+        existingMsgIds.add(fullMsg.id);
+        logger.info(`Gmail sync: message ${fullMsg.id} déjà inséré par un autre passage — ignoré`);
+        continue;
+      }
+      throw err;
+    }
+
     if (!latestMsgDate || msgDate > latestMsgDate) latestMsgDate = msgDate;
     // Guard against re-inserting the same id twice within this same thread pass
     // (Gmail can list a message under more than one thread during a merge).
     existingMsgIds.add(fullMsg.id);
     logger.info(`Gmail sync: saved message ${fullMsg.id} (role=${role}) to conversation ${conversationId}`);
     newMessages++;
-    if (role === 'incoming') newGuestMessages++;
+    // A placeholder is a record that something arrived, not a question. Letting
+    // it trigger the automatic reply would have Michel answer a body it could
+    // not read — the host looks at this one.
+    if (role === 'incoming' && !unreadable) newGuestMessages++;
   }
 
   // Touch updated_at once so the conversation floats to the top of the inbox
@@ -897,6 +1072,27 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     });
   }
 
+  // Advance booking_status from the messages that just landed.
+  //
+  // autoUpdateStatus only ever ran from the manual "add message" endpoint, so a
+  // conversation fed entirely by Gmail — which is all of them — stayed on
+  // 'inquiry' for its whole life. That fed the model a wrong booking state on
+  // every generation, and left the closure rule's 'checked_out' signal dead: a
+  // stay could not be recognised as finished because nothing ever recorded that
+  // it had started. Status only moves forward, so this is safe to re-run.
+  if (newMessages > 0) {
+    setImmediate(() => {
+      try {
+        const { autoUpdateStatus } = require('./statusDetector');
+        Promise.resolve(autoUpdateStatus(conversationId)).catch(statusErr => {
+          logger.warn(`Status detection failed for conversation ${conversationId}: ${statusErr.message}`);
+        });
+      } catch (statusErr) {
+        logger.warn(`Status detection failed for conversation ${conversationId}: ${statusErr.message}`);
+      }
+    });
+  }
+
   // Automatic reply: book a slot for this conversation once a genuinely new
   // GUEST message landed. Also off the critical path — scheduling only writes a
   // queue row (the model runs later, in the worker), and a failure here must
@@ -921,6 +1117,25 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
   }
 
   return newMessages;
+}
+
+/**
+ * Does this error mean "that message is already stored"?
+ *
+ * Recognises the unique-violation shapes of both engines the app runs on
+ * (better-sqlite3 in dev/test/production-on-Render, mysql2 when DB_HOST is
+ * configured). Matching on the message text as well as the code keeps it
+ * working when knex wraps the driver error.
+ */
+function isDuplicateMessageError(err) {
+  const message = String(err?.message || '');
+  return (
+    err?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    err?.code === 'SQLITE_CONSTRAINT' ||
+    err?.code === 'ER_DUP_ENTRY' ||
+    err?.errno === 1062 ||
+    /UNIQUE constraint failed|Duplicate entry/i.test(message)
+  );
 }
 
 /**
@@ -971,6 +1186,12 @@ async function getExistingGmailMessageIds(db, conversationId) {
 // Cap the stored host-name list: it should hold an owner plus a few co-hosts,
 // never grow without bound from a mis-parsed body.
 const MAX_HOST_NAMES = 25;
+
+/**
+ * How long the incremental watermark may stay pinned by unreadable threads
+ * before it is allowed to move on anyway. See finishSyncLog.
+ */
+const MAX_WATERMARK_STALL_MS = parseInt(process.env.GMAIL_MAX_WATERMARK_STALL_MS, 10) || 24 * 60 * 60 * 1000;
 
 /** Read the host names accumulated on a Gmail account row. */
 function loadHostNames(account) {
@@ -1911,16 +2132,62 @@ function stripHtml(html) {
 }
 
 /**
- * Mark sync as complete and update account
+ * Mark sync as complete and update the account's incremental watermark.
+ *
+ * `last_sync_at` is not bookkeeping — it is the left edge of the next
+ * `after:` window, so writing it is a promise that everything before it has
+ * been imported. Two rules follow:
+ *
+ *   - the watermark is the moment the run STARTED, not NOW(). A run that took
+ *     four minutes must not claim the four minutes it spent working.
+ *   - a run that could not read every thread does not move it at all. Losing a
+ *     little ground (the next run re-reads threads it already has, which is
+ *     cheap and de-duplicated by gmail_message_id) is always better than
+ *     stepping over a thread that failed: the incremental window never comes
+ *     back, so those messages would be gone for good.
  */
-async function finishSyncLog(db, syncLogId, synced, accountId) {
+async function finishSyncLog(db, syncLogId, synced, accountId, options = {}) {
+  const { watermark = null, complete = true, incompleteThreads = 0 } = options;
+
   await db.query(
     'UPDATE sync_logs SET status = ?, items_synced = ?, completed_at = NOW() WHERE id = ?',
     ['completed', synced, syncLogId]
   );
+
+  if (!complete) {
+    // Holding the watermark is the right move for a transient failure, but it
+    // must not become permanent: one thread Gmail reliably errors on would pin
+    // the window open forever, and every 60s cycle would then re-list and
+    // re-fetch the entire mailbox. Past MAX_WATERMARK_STALL_MS the trade
+    // reverses — the thread is not coming back on its own, and by now it is
+    // either registered in gmail_threads (so the reconciliation pass owns its
+    // recovery) or genuinely unreadable.
+    const [current] = await db.query('SELECT last_sync_at FROM gmail_accounts WHERE id = ?', [accountId]);
+    const previous = current?.last_sync_at ? new Date(`${String(current.last_sync_at).replace(' ', 'T')}Z`) : null;
+    const stalledMs = previous ? Date.now() - previous.getTime() : Infinity;
+
+    if (stalledMs <= MAX_WATERMARK_STALL_MS) {
+      logger.warn(
+        `Gmail sync: ${incompleteThreads} fil(s) non lus pour le compte ${accountId} — ` +
+        'le repère de synchronisation reste en arrière pour qu\'ils soient repris au prochain passage'
+      );
+      await db.query(
+        'UPDATE gmail_accounts SET sync_status = ?, sync_error = NULL WHERE id = ?',
+        ['idle', accountId]
+      );
+      return;
+    }
+
+    logger.warn(
+      `Gmail sync: compte ${accountId} bloqué depuis ${Math.round(stalledMs / 3_600_000)} h sur ` +
+      `${incompleteThreads} fil(s) illisibles — le repère avance malgré tout ; ` +
+      'la passe de réconciliation prend le relais pour ces fils'
+    );
+  }
+
   await db.query(
-    'UPDATE gmail_accounts SET last_sync_at = NOW(), sync_status = ?, sync_error = NULL WHERE id = ?',
-    ['idle', accountId]
+    'UPDATE gmail_accounts SET last_sync_at = ?, sync_status = ?, sync_error = NULL WHERE id = ?',
+    [toSqlDateTime(watermark || new Date()), 'idle', accountId]
   );
 }
 
@@ -2055,6 +2322,15 @@ async function purgeNonAirbnbConversations(userId) {
          )`,
         [thread.conversation_id, userId]
       );
+      // Queued/failed replies for this conversation. outbound_replies carries no
+      // foreign key (see migration 017), so nothing removes these on its own:
+      // without this the purge left rows pointing at a conversation id that no
+      // longer exists — and, worse, an id the database is free to reissue to a
+      // future conversation.
+      await db.query(
+        'DELETE FROM outbound_replies WHERE conversation_id = ? AND user_id = ?',
+        [thread.conversation_id, userId]
+      );
       // Delete the gmail_thread record
       await db.query('DELETE FROM gmail_threads WHERE id = ? AND user_id = ?', [thread.id, userId]);
       // Delete the conversation
@@ -2077,6 +2353,7 @@ module.exports = {
   getUserGmailAccounts,
   deactivateAccount,
   fetchMessages,
+  reconcileThreads,
   purgeNonAirbnbConversations,
   // Exposés pour les scripts d'audit lecture seule (scripts/audit-missing-messages.js) :
   // reproduire exactement le filtrage du sync est le seul moyen de classer un
@@ -2089,6 +2366,7 @@ module.exports = {
   // n'appelle plus l'API Gmail — les messages lui sont passés déjà chargés —
   // donc il est testable directement, sans réseau.
   __syncGmailThread: syncGmailThread,
+  __finishSyncLog: finishSyncLog,
   __mergeConversationInto: mergeConversationInto,
   __reconcileAirbnbThread: reconcileAirbnbThread,
   __extractAirbnbThreadIdFromMessage: extractAirbnbThreadIdFromMessage

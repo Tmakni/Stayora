@@ -17,8 +17,15 @@
 const policy = require('../services/autoReplyPolicy');
 const { INTENTS } = require('../services/intentClassifier');
 
-/** Un contexte où TOUT le reste autorise l'envoi : seul le garde-fou testé peut refuser. */
+/**
+ * Un contexte où TOUT le reste autorise l'envoi : seul le garde-fou testé peut refuser.
+ *
+ * `aiResult` est FUSIONNÉ et non remplacé : un test qui ne surcharge que
+ * `draft_reply` doit garder la certitude et l'intention de référence, sinon il
+ * mesure le refus du champ manquant au lieu du garde-fou qu'il vise.
+ */
 function allowingInput(overrides = {}) {
+  const { aiResult: aiOverrides, ...rest } = overrides;
   return {
     incomingMessage: 'Bonjour, quel est le code du wifi ?',
     aiResult: {
@@ -26,12 +33,15 @@ function allowingInput(overrides = {}) {
       risk_level: 'low',
       escalate: false,
       needs_host: false,
+      // Le modèle doit déclarer sa certitude : son absence est un refus.
+      confidence: 0.95,
       draft_reply: 'Le code wifi est Bienvenue2024, le réseau s\'appelle Villa-Cosy.',
+      ...(aiOverrides || {}),
     },
     userMode: policy.MODES.AUTO,
     propertyMode: null,
     paused: false,
-    ...overrides,
+    ...rest,
   };
 }
 

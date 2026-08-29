@@ -22,6 +22,7 @@ const logger = require('../utils/logger');
 const queue = require('./outboundQueue');
 const policy = require('./autoReplyPolicy');
 const { resolveReplyContext, getLatestGuestMessage } = require('./replyContextService');
+const { evaluateClosure } = require('./conversationClosure');
 const { generateDraftReply } = require('./aiService');
 const { getHostStyle } = require('./hostStyleService');
 
@@ -61,6 +62,7 @@ async function loadSettings(userId, propertyId) {
  */
 async function scheduleForConversation({ userId, conversationId, propertyId = null }) {
   try {
+    const db = getDatabase();
     const settings = await loadSettings(userId, propertyId);
 
     // Cheap gate first: in manual mode nothing is ever queued automatically.
@@ -87,6 +89,23 @@ async function scheduleForConversation({ userId, conversationId, propertyId = nu
     }
     if (latest.hostRepliedLast) {
       return { scheduled: false, reason: 'host_replied_last' };
+    }
+
+    // A finished conversation is not worth a queue slot, a model call, or the
+    // 60s the host spends wondering why a reply is pending on a stay that ended
+    // last month. Re-checked at send time too (the policy runs the same rule),
+    // but catching it here keeps the queue honest.
+    const convRows = await db.query(
+      'SELECT booking_status FROM conversations WHERE id = ? AND user_id = ?',
+      [conversationId, userId]
+    );
+    const closure = evaluateClosure({
+      recent: latest.recent,
+      bookingStatus: convRows[0]?.booking_status || null,
+    });
+    if (closure.closed) {
+      logger.info(`Réponse auto ignorée pour la conversation ${conversationId} : ${closure.reason}`);
+      return { scheduled: false, reason: `conversation_closed:${closure.code}` };
     }
 
     // Resolve the envelope now: if we cannot reply at all (no Reply-To, missing
@@ -246,6 +265,10 @@ async function prepareQueuedReply(row) {
     userMode: settings.userMode,
     propertyMode: settings.propertyMode,
     paused: settings.paused,
+    // The whole recent thread, newest-first — closure detection needs to see
+    // how the guest last left things, not just the text being answered.
+    recentMessages: latest.recent,
+    bookingStatus,
   });
 
   const decision = {
@@ -255,6 +278,8 @@ async function prepareQueuedReply(row) {
     risk_level: aiResult.risk_level,
     needs_host: !!aiResult.needs_host,
     escalate: !!aiResult.escalate,
+    confidence: typeof aiResult.confidence === 'number' ? aiResult.confidence : null,
+    fallback: aiResult.fallback === true,
   };
 
   if (!verdict.allowed) {

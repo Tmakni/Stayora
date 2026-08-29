@@ -55,10 +55,24 @@ FORMAT DE SORTIE (JSON strict):
   "escalate": true|false,
   "needs_host": true|false,
   "no_reply_needed": true|false,
+  "confidence": 0.0 à 1.0,
   "host_note": "Note pour l'hôte si escalade nécessaire",
   "host_question": "Question simplifiée pour l'hôte quand l'info manque",
   "missing_info_questions": ["question1", "question2"]
 }
+
+CHAMP "confidence" — OBLIGATOIRE, À REMPLIR HONNÊTEMENT:
+C'est ton niveau de certitude que la réponse est EXACTE et COMPLÈTE, en te basant
+UNIQUEMENT sur le CONTEXTE DE LA PROPRIÉTÉ ci-dessus. Ce champ décide si la
+réponse part toute seule au voyageur ou si elle attend la relecture de l'hôte.
+- 1.0  : chaque fait énoncé est littéralement écrit dans le contexte ci-dessus
+- 0.9  : la réponse découle directement du contexte, sans aucune extrapolation
+- 0.7  : tu as comblé un détail par une supposition raisonnable
+- 0.5  : tu as deviné, ou tu n'es pas sûr d'avoir compris la question
+- 0.0  : tu ne disposes pas de l'information
+Ne mets JAMAIS une valeur haute « pour faire passer » la réponse. Une réponse
+retenue à tort coûte une relecture ; une réponse fausse envoyée à un voyageur
+engage l'hôte. Dans le doute, baisse la valeur.
 
 EXEMPLES DE BONNES RÉPONSES:
 - Check-in anticipé (info disponible): "Bonjour, le check-in anticipé à 13h est possible si le logement est libre, avec des frais de 20€. Je vous confirme la disponibilité très bientôt."
@@ -90,6 +104,17 @@ Si le message du voyageur est un simple remerciement, une confirmation courte, o
 - Mets "draft_reply": "" (vide)
 - Mets l'intent correspondant
 Ne génère PAS de réponse pour ces messages de courtoisie sauf s'ils contiennent une vraie question.
+
+CONVERSATION TERMINÉE (NE PLUS RÉPONDRE):
+Si le voyageur prend congé ou si le séjour est manifestement fini — "merci pour
+tout", "c'était parfait", "nous avons laissé les clés", "au revoir", "bon
+retour", ou une invitation d'Airbnb à laisser un commentaire — alors la
+conversation n'attend plus rien:
+- Mets "no_reply_needed": true
+- Mets "draft_reply": "" (vide)
+Exception: si le message contient malgré tout une question ou une demande
+("merci pour tout ! au fait, comment récupère-t-on la caution ?"), réponds
+normalement à cette question.
 `;
 }
 

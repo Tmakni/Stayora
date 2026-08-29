@@ -19,8 +19,20 @@ let initialSyncTimeout = null;
 let airbnbSyncRunning = false;
 let gmailSyncRunning = false;
 let icalSyncRunning = false;
+let reconcileInterval = null;
+let reconcileRunning = false;
 const SYNC_INTERVAL_MS = 60 * 1000; // 60 seconds
 const ICAL_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Catch-up pass over threads we already know (see
+ * gmailSyncService.reconcileThreads). Deliberately slow and bounded: it is a
+ * safety net for messages the incremental window missed, not a second sync.
+ * A handful of threads.get every 10 minutes is invisible against Gmail's quota
+ * and covers a large mailbox within a few hours.
+ */
+const RECONCILE_INTERVAL_MS = parseInt(process.env.GMAIL_RECONCILE_INTERVAL_MS, 10) || 10 * 60 * 1000;
+const RECONCILE_THREADS_PER_ACCOUNT = parseInt(process.env.GMAIL_RECONCILE_BATCH, 10) || 40;
 
 function getIcalService() {
   return require('./icalService');
@@ -186,6 +198,49 @@ async function runGmailSyncCycle() {
 }
 
 /**
+ * Catch-up pass: re-read known Gmail threads and import anything the
+ * incremental window missed. Broadcasts whatever it recovers, so a message
+ * rescued here reaches an open UI the same way a freshly synced one does.
+ */
+async function runGmailReconcileCycle() {
+  if (reconcileRunning) return;
+  // Never overlap with the main sync: both call syncGmailThread, and the DB
+  // pool is a single connection on SQLite.
+  if (gmailSyncRunning) return;
+  reconcileRunning = true;
+  const db = getDatabase();
+
+  try {
+    const accounts = await db.query(
+      'SELECT id, user_id FROM gmail_accounts WHERE is_active = TRUE'
+    );
+    if (accounts.length === 0) return;
+
+    await runAccountsConcurrently(accounts, async (account) => {
+      try {
+        const sinceMessageId = await getMaxMessageId(db);
+        const result = await gmailSync.reconcileThreads(account.user_id, account.id, {
+          limit: RECONCILE_THREADS_PER_ACCOUNT,
+        });
+        if (result && result.recovered > 0) {
+          logger.info(
+            `Réconciliation : ${result.recovered} message(s) récupéré(s) pour le compte ${account.id}`
+          );
+          await broadcastMessagesSince(db, account.user_id, sinceMessageId);
+        }
+      } catch (err) {
+        // A reconciliation failure is never fatal — the next pass tries again.
+        logger.warn(`Réconciliation Gmail impossible pour le compte ${account.id} : ${err.message}`);
+      }
+    });
+  } catch (err) {
+    logger.error('Gmail reconcile cycle error:', err.message);
+  } finally {
+    reconcileRunning = false;
+  }
+}
+
+/**
  * Run `worker` over every account with bounded concurrency.
  *
  * The cycles used to await one account at a time. Each Gmail account costs a
@@ -277,6 +332,12 @@ function startScheduler() {
     runIcalSyncCycle();
   }, ICAL_SYNC_INTERVAL_MS);
 
+  // Rattrapage Gmail — voir RECONCILE_INTERVAL_MS en haut du fichier (10 min).
+  logger.info(`Starting Gmail reconciliation (interval: ${RECONCILE_INTERVAL_MS / 60000}min)`);
+  reconcileInterval = setInterval(() => {
+    runGmailReconcileCycle();
+  }, RECONCILE_INTERVAL_MS);
+
   // Run first sync after a short delay to let server fully start
   initialSyncTimeout = setTimeout(() => {
     initialSyncTimeout = null;
@@ -314,6 +375,10 @@ function stopScheduler() {
     clearInterval(icalSyncInterval);
     icalSyncInterval = null;
   }
+  if (reconcileInterval) {
+    clearInterval(reconcileInterval);
+    reconcileInterval = null;
+  }
   if (initialSyncTimeout) {
     clearTimeout(initialSyncTimeout);
     initialSyncTimeout = null;
@@ -329,5 +394,6 @@ module.exports = {
   broadcastNewMessage,
   broadcastConversationUpdate,
   startScheduler,
-  stopScheduler
+  stopScheduler,
+  runGmailReconcileCycle
 };

@@ -301,10 +301,16 @@ async function upsertReservation(userId, accountId, resa) {
     if (props.length > 0) propertyId = props[0].id;
   }
 
-  // Check if reservation already exists
+  // Check if reservation already exists.
+  //
+  // Scoped by user_id. Without it this lookup reached across accounts: a
+  // reservation id belonging to ANOTHER host matched, and the UPDATE below then
+  // rewrote that host's row — including `property_id = COALESCE(?, property_id)`
+  // with a property id from THIS user. Two hosts sharing a listing (co-hosting
+  // is normal on Airbnb) is all it took.
   const existing = await db.query(
-    'SELECT id, status FROM reservations WHERE airbnb_reservation_id = ?',
-    [airbnbResaId]
+    'SELECT id, status FROM reservations WHERE user_id = ? AND airbnb_reservation_id = ?',
+    [userId, airbnbResaId]
   );
 
   const guestName = resa.guest?.first_name
@@ -321,7 +327,7 @@ async function upsertReservation(userId, accountId, resa) {
         guest_name = ?, number_of_guests = ?,
         total_price = ?, host_payout = ?,
         airbnb_raw_json = ?, last_synced_at = NOW(), property_id = COALESCE(?, property_id)
-       WHERE id = ?`,
+       WHERE id = ? AND user_id = ?`,
       [
         status,
         statusChanged ? prev.status : prev.previous_status,
@@ -332,7 +338,8 @@ async function upsertReservation(userId, accountId, resa) {
         resa.host_payout_amount || resa.expected_payout_amount_accurate || null,
         JSON.stringify(resa),
         propertyId,
-        prev.id
+        prev.id,
+        userId
       ]
     );
 
@@ -515,9 +522,12 @@ async function syncThread(userId, accountId, accessToken, thread) {
     // Find matching reservation
     let reservationId = null;
     if (thread.reservation?.id) {
+      // Scoped by user_id: an unscoped match would attach THIS user's thread to
+      // ANOTHER user's reservation row, and every status update that follows
+      // would then read from the wrong account.
       const resas = await db.query(
-        'SELECT id FROM reservations WHERE airbnb_reservation_id = ?',
-        [String(thread.reservation.id)]
+        'SELECT id FROM reservations WHERE user_id = ? AND airbnb_reservation_id = ?',
+        [userId, String(thread.reservation.id)]
       );
       if (resas.length > 0) reservationId = resas[0].id;
     }

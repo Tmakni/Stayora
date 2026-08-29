@@ -124,6 +124,40 @@ module.exports = {
     connection: ':memory:'
   },
 
+  // ─── Test MySQL — moteur réel, pour ce que SQLite ne peut pas prouver ──────
+  //
+  // SQLite et MySQL ne divergent pas sur les requêtes de cette application,
+  // mais ils divergent sur ce qui nous intéresse le plus ici : le TYPAGE et les
+  // CONTRAINTES. SQLite accepte une chaîne dans une colonne DATE, tolère un
+  // dépassement de longueur, et applique les clés étrangères seulement si
+  // PRAGMA foreign_keys est activé. MySQL refuse. Une contrainte vérifiée
+  // uniquement sur SQLite n'est donc pas vérifiée.
+  //
+  // Activé par TEST_MYSQL_HOST. Sans cette variable, les tests concernés se
+  // déclarent ignorés plutôt que de passer en silence — un test vert sur un
+  // moteur absent serait pire que pas de test du tout.
+  //
+  //   docker run --rm -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=michel_test \
+  //     -p 3307:3306 mysql:8
+  //   TEST_MYSQL_HOST=127.0.0.1 TEST_MYSQL_PORT=3307 TEST_MYSQL_USER=root \
+  //     TEST_MYSQL_PASSWORD=root TEST_MYSQL_NAME=michel_test npx jest mysqlSchema
+  mysqlTest: {
+    client: 'mysql2',
+    connection: {
+      host:     process.env.TEST_MYSQL_HOST || '127.0.0.1',
+      port:     parseInt(process.env.TEST_MYSQL_PORT, 10) || 3306,
+      user:     process.env.TEST_MYSQL_USER || 'root',
+      password: process.env.TEST_MYSQL_PASSWORD || '',
+      database: process.env.TEST_MYSQL_NAME || 'michel_test',
+      charset:  'utf8mb4',
+      // Les dates malformées doivent ÉCHOUER, pas devenir '0000-00-00' :
+      // c'est précisément ce que ces tests vérifient.
+      dateStrings: true,
+    },
+    pool: { min: 1, max: 5 },
+    migrations: MIGRATIONS
+  },
+
   // ─── Production — MySQL cloud ou SQLite si USE_MEMORY_DB=true ──────────────
   production: buildProductionConfig()
 };

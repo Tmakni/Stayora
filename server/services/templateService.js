@@ -102,6 +102,19 @@ function generateFromTemplate(intent, propertyContext, incomingMessage) {
   return template;
 }
 
+/**
+ * Réponse de repli quand OpenAI est indisponible.
+ *
+ * Le résultat porte `fallback: true` et `confidence: null`. Ce n'est pas une
+ * décoration : ces gabarits comblent une information absente par une valeur par
+ * défaut (« le check-in est prévu à partir de 15:00 », « le code d'accès est [À
+ * FOURNIR] »). Rien de tout cela ne vient de la fiche du logement, et rien dans
+ * les autres garde-fous ne le distinguait d'une vraie réponse : sujet
+ * whitelisté, risque faible, longueur plausible, aucune formule d'esquive.
+ * Une panne d'OpenAI envoyait donc au voyageur une heure d'arrivée inventée.
+ *
+ * Le brouillon reste utile — l'hôte le relit et l'envoie — mais jamais seul.
+ */
 function buildFallbackResponse(intent, risk, propertyContext, incomingMessage) {
   // Check for courtesy messages that need no reply
   const courtesyPattern = /^(merci|ok|d'accord|super|parfait|top|cool|nickel|genial|g[ée]nial|bonne journ[ée]e|bonne soir[ée]e|thanks|thank you|great|perfect|awesome|noted|got it|okay|ok merci|merci beaucoup|super merci|parfait merci|c'est not[ée]|c'est parfait|tres bien|très bien)[.!\s]*$/i;
@@ -112,6 +125,8 @@ function buildFallbackResponse(intent, risk, propertyContext, incomingMessage) {
       risk_level: 'low',
       escalate: false,
       no_reply_needed: true,
+      confidence: null,
+      fallback: true,
       host_note: null,
       missing_info_questions: []
     };
@@ -141,6 +156,8 @@ function buildFallbackResponse(intent, risk, propertyContext, incomingMessage) {
     intent,
     risk_level: risk,
     escalate,
+    confidence: null,
+    fallback: true,
     host_note: hostNote,
     missing_info_questions: []
   };
