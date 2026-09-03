@@ -85,6 +85,68 @@ function validateAirbnbUrl(input) {
 }
 
 /**
+ * Normalise une adresse de profil hôte Airbnb.
+ *
+ * Airbnb sert DEUX formes pour la même page, et l'adresse que l'hôte copie
+ * depuis son navigateur traîne en plus des paramètres de suivi :
+ *
+ *   https://www.airbnb.fr/users/profile/1462634058239796981?previous_page_name=…
+ *   https://www.airbnb.fr/users/show/1462634058239796981
+ *   1462634058239796981
+ *
+ * Seule /users/show/ était reconnue, et les paramètres n'étaient pas retirés.
+ * L'IDENTIFIANT est la référence : tout le reste se reconstruit à partir de lui,
+ * ce qui rend l'entrée insensible au domaine régional, à la casse et au suivi.
+ *
+ * @returns {{valid: boolean, id?: string, urls?: string[], reason?: string}}
+ */
+function normalizeProfileUrl(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return { valid: false, reason: 'Adresse vide' };
+
+  // Identifiant seul.
+  if (/^\d{4,25}$/.test(raw)) return { valid: true, id: raw, urls: profileUrlsFor(raw) };
+
+  let candidate = raw;
+  if (!/^https?:\/\//i.test(candidate)) candidate = 'https://' + candidate;
+
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return { valid: false, reason: "Format d'adresse invalide" };
+  }
+
+  if (!isAirbnbHost(parsed.hostname)) {
+    return { valid: false, reason: 'Seules les adresses Airbnb sont acceptées' };
+  }
+
+  const match = parsed.pathname.match(/\/users\/(?:profile|show)\/(\d{4,25})/i);
+  if (!match) {
+    return {
+      valid: false,
+      reason: "Cette adresse n'est pas celle d'un profil hôte (attendu /users/profile/… ou /users/show/…)",
+    };
+  }
+
+  // Les paramètres sont abandonnés en reconstruisant l'adresse depuis
+  // l'identifiant seul : `previous_page_name`, `source_impression_id` et
+  // consorts n'apportent rien et suivent la navigation de l'hôte.
+  return { valid: true, id: match[1], urls: profileUrlsFor(match[1]) };
+}
+
+/**
+ * Les deux formes canoniques à essayer, dans l'ordre. Selon la région et la
+ * langue, Airbnb rend l'une ou l'autre.
+ */
+function profileUrlsFor(id) {
+  return [
+    `https://www.airbnb.fr/users/profile/${id}`,
+    `https://www.airbnb.com/users/show/${id}`,
+  ];
+}
+
+/**
  * Fetch with a timeout, a hard byte cap, and manually-validated redirects.
  *
  * `redirect: 'manual'` matters: with 'follow', a single open redirect on an
@@ -263,6 +325,56 @@ const BOILERPLATE_NAMES = new Set([
 ]);
 
 /**
+ * Titres de pages qui ne sont PAS une annonce.
+ *
+ * Airbnb ne répond pas toujours par la fiche demandée. Selon la région, la
+ * langue ou le soupçon de robot, il renvoie une page intermédiaire — une
+ * redirection vers le domaine local, un mur anti-robot, une page d'erreur —
+ * qui possède un `<title>` parfaitement lisible et totalement faux. C'est
+ * ainsi que des logements se sont retrouvés nommés
+ *
+ *     « Redirection vers fr.airbnb.com »
+ *
+ * La liste ci-dessus ne les attrapait pas : elle compare des chaînes ENTIÈRES,
+ * et celle-ci n'y figure pas. Les motifs ci-dessous jugent la FORME du titre,
+ * ce qui couvre aussi les variantes de langue et de domaine.
+ *
+ * Le principe : mieux vaut ne pas avoir de nom et le demander à l'hôte que d'en
+ * inscrire un faux. Un nom faux ne se voit pas — il ressemble à un vrai nom
+ * dans la liste des logements — et c'est celui que Michel citera au voyageur.
+ */
+const INVALID_NAME_PATTERNS = [
+  // Un vrai nom d'annonce ne contient pas le domaine d'Airbnb. C'est le motif
+  // qui attrape « Redirection vers fr.airbnb.com » quelle que soit sa langue.
+  /(?:^|[\s/@.])(?:[a-z0-9-]+\.)*airbnb\.[a-z]{2,3}(?:\.[a-z]{2})?(?:$|[\s/:,])/i,
+  // Titre d'accueil générique d'Airbnb. C'est ce que renvoie une page de profil
+  // récupérée côté serveur : « Airbnb : locations de vacances, cabanes… ».
+  // Une annonce ne s'appelle pas « Airbnb » suivi de deux points.
+  /^\s*airbnb\s*[:：|·–—-]/i,
+  // Pages de redirection, dans les langues qu'Airbnb sert à cette application.
+  /\bredirection\b/i,
+  /\bredirecting\b/i,
+  /\bredirig\w*\b/i,
+  /\bvous allez être redirigé\b/i,
+  // Murs anti-robot et pages d'attente.
+  /^\s*(?:just a moment|un instant|attention required)/i,
+  /\bchecking your browser\b/i,
+  /\bv[ée]rification (?:de|du) (?:votre )?navigateur\b/i,
+  /\b(?:activez|enable) (?:le )?javascript\b/i,
+  /\baccess (?:to this page )?denied\b/i,
+  /acc[èe]s\s+refus/i,
+  // Pages d'erreur.
+  /\bpage (?:introuvable|non trouv[ée]e|indisponible)\b/i,
+  /\b(?:page )?not found\b/i,
+  /\b(?:oops|something went wrong|une erreur est survenue)\b/i,
+  /^\s*(?:erreur|error)\s*\d*\s*$/i,
+  /^\s*\d{3}\s*[-–—|]?\s*(?:error|erreur)?\s*$/i,
+];
+
+/** Le titre se réduit-il à un nom de domaine ou une URL ? */
+const DOMAIN_ONLY = /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i;
+
+/**
  * Normalise a raw title candidate into a listing name, or return null.
  */
 function cleanListingTitle(raw) {
@@ -310,6 +422,33 @@ function isPlaceholderName(name, listingId) {
   if (/^logement(\s+airbnb)?\s*#?\s*\d+$/i.test(value)) return true;
   if (/^(?:listing|annonce|property)\s*#?\s*\d+$/i.test(value)) return true;
   if (listingId && value.includes(String(listingId))) return true; // id leaked into the name
+  if (DOMAIN_ONLY.test(value)) return true;                        // « fr.airbnb.com »
+  for (const re of INVALID_NAME_PATTERNS) {                        // redirection, mur anti-robot, erreur
+    if (re.test(value)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * La page reçue est-elle une page intermédiaire plutôt que la fiche demandée ?
+ *
+ * Sert à ne PAS lire le `<title>` d'une page qui n'est pas l'annonce. Le titre
+ * d'une redirection est bien formé et passerait sans cela pour un nom, faute de
+ * JSON-LD et d'Open Graph sur ces pages pour le devancer.
+ *
+ * Ne juge que des signaux structurels : une redirection déclarée dans l'en-tête,
+ * ou une page si courte qu'elle ne peut pas contenir une fiche.
+ */
+function looksLikeInterstitial(html) {
+  if (typeof html !== 'string' || html.trim() === '') return true;
+
+  // <meta http-equiv="refresh" content="0; url=…"> : la page dit elle-même
+  // qu'elle n'est qu'un relais.
+  if (/<meta[^>]+http-equiv=["']?refresh["']?[^>]*>/i.test(html)) return true;
+
+  const title = titleFromPageTitle(html);
+  if (title && isPlaceholderName(title, null)) return true;
 
   return false;
 }
@@ -381,10 +520,15 @@ function titleFromPageTitle(html) {
  * @returns {{name: string|null, source: string}}
  */
 function resolveListingTitle({ html = '', listingId = null, parsedName = null, scanName = null } = {}) {
+  // Une page intermédiaire — redirection, mur anti-robot, erreur — n'a rien à
+  // dire sur cette annonce. On l'écarte AVANT toute lecture plutôt que de
+  // compter sur la validation pour rattraper chaque titre qu'elle peut porter.
+  const usableHtml = html && !looksLikeInterstitial(html) ? html : '';
+
   const attempts = [
-    ['json_ld', () => (html ? titleFromJsonLd(html) : null)],
-    ['open_graph', () => (html ? titleFromOpenGraph(html) : null)],
-    ['page_title', () => (html ? titleFromPageTitle(html) : null)],
+    ['json_ld', () => (usableHtml ? titleFromJsonLd(usableHtml) : null)],
+    ['open_graph', () => (usableHtml ? titleFromOpenGraph(usableHtml) : null)],
+    ['page_title', () => (usableHtml ? titleFromPageTitle(usableHtml) : null)],
     ['parsed_data', () => cleanListingTitle(parsedName)],
     ['profile_scan', () => cleanListingTitle(scanName)],
   ];
@@ -408,6 +552,8 @@ module.exports = {
   // URL safety
   isAirbnbHost,
   validateAirbnbUrl,
+  normalizeProfileUrl,
+  profileUrlsFor,
   safeFetch,
   extractListingId,
   resolveShortLink,
@@ -415,6 +561,7 @@ module.exports = {
   cleanListingTitle,
   isPlaceholderName,
   isValidListingName,
+  looksLikeInterstitial,
   resolveListingTitle,
   titleFromJsonLd,
   titleFromOpenGraph,

@@ -20,8 +20,8 @@
  */
 
 const { INTENTS } = require('./intentClassifier');
-const { isCourtesyOnly, hasUnfilledPlaceholder } = require('./replyGuard');
-const { evaluateClosure } = require('./conversationClosure');
+const { hasUnfilledPlaceholder } = require('./replyGuard');
+const { evaluateReplyNecessity, NECESSITY } = require('./replyNecessity');
 
 /**
  * Minimum self-reported confidence for an unattended send.
@@ -199,17 +199,32 @@ function evaluateAutoReply({
   // ── Is there anything left to answer? ───────────────────────────────────
   // Checked before anything that reasons about the ANSWER: when the thread is
   // over, the quality of the draft is beside the point.
-  const closure = evaluateClosure({ recent: recentMessages, bookingStatus });
-  if (closure.closed) {
-    return deny('conversation_closed', closure.reason);
-  }
+  //
+  // Delegated to services/replyNecessity.js so that this path and the manual
+  // "Générer" button share ONE definition of "nothing to answer here". They
+  // used to disagree: the closure and courtesy rules below lived only here, so
+  // the host could hand-generate the very message this gate refuses to send.
+  const necessity = evaluateReplyNecessity({
+    recent: recentMessages,
+    bookingStatus,
+    incomingMessage,
+  });
 
-  // Deterministic courtesy net, independent of the model. The model is supposed
-  // to set no_reply_needed, but this path must not depend on it agreeing —
-  // answering "merci !" with a paragraph is the single most visible way an
-  // automated host reads as a robot.
-  if (isCourtesyOnly(incomingMessage)) {
+  // Only the verdicts that judge the CONTENT are acted on here.
+  //
+  // `no_incoming_message` and `host_replied_last` are deliberately ignored:
+  // autoReplyService refuses both before a reply is ever scheduled, and this
+  // function is called with the guest message it must judge — several callers
+  // pass that message without the surrounding thread, and reading their empty
+  // `recentMessages` as "nothing to answer" would refuse every one of them.
+  if (necessity.code === NECESSITY.CLOSED) {
+    return deny('conversation_closed', necessity.reason);
+  }
+  if (necessity.code === NECESSITY.COURTESY) {
     return deny('courtesy_message', 'Simple message de politesse — aucune réponse nécessaire');
+  }
+  if (necessity.code === NECESSITY.NO_ANSWER_EXPECTED) {
+    return deny('no_answer_expected', necessity.reason);
   }
 
   // ── Model's own refusals ────────────────────────────────────────────────

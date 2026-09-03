@@ -1,10 +1,12 @@
 const logger = require('../utils/logger');
+const { scanProfileWithBrowser } = require('../services/airbnbProfileBrowser');
 const {
   validateAirbnbUrl,
   safeFetch,
   extractListingId,
   resolveShortLink,
   resolveListingTitle,
+  normalizeProfileUrl,
   isValidListingName,
   isPlaceholderName,
   cleanListingTitle,
@@ -837,30 +839,94 @@ async function scanAirbnbProfile(req, res) {
     return res.status(400).json({ error: "URL de profil Airbnb requise" });
   }
 
-  let url = profileUrl.trim();
-  // Accept bare user IDs
-  if (/^\d+$/.test(url)) url = `https://www.airbnb.com/users/show/${url}`;
-  if (!url.startsWith('http')) url = 'https://' + url;
-
-  // SSRF protection. The previous check only blocked private/internal hosts,
-  // so ANY public URL was fetchable through this authenticated endpoint —
-  // effectively a request proxy. Now the host must be Airbnb, every redirect
-  // hop is re-validated, and the response is bounded in time and size.
-  const urlCheck = validateAirbnbUrl(url);
-  if (!urlCheck.valid) {
-    return res.status(400).json({ error: `URL invalide: ${urlCheck.reason}` });
+  // Normalisation en un seul endroit : les deux formes d'adresse, l'identifiant
+  // seul, et le retrait des parametres de suivi que l'hote copie avec le lien.
+  // L'IDENTIFIANT est la reference ; les adresses sont reconstruites a partir
+  // de lui, jamais reprises telles quelles.
+  const profile = normalizeProfileUrl(profileUrl);
+  if (!profile.valid) {
+    return res.status(400).json({ error: `Adresse invalide : ${profile.reason}` });
   }
-  url = urlCheck.url;
+  const profileId = profile.id;
 
-  logger.info(`Airbnb profile scan: ${url}`);
+  logger.info(`Airbnb profile scan: profil ${profileId}`);
 
-  const scanResult = await safeFetch(url, {
-    timeoutMs: 15000,
-    headers: { 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8', 'Cache-Control': 'no-cache' },
-  });
-  const html = scanResult.ok ? scanResult.body : '';
-  if (!scanResult.ok) {
-    logger.warn(`Profile scan fetch error: ${scanResult.reason}`);
+  // ── Voie 1 : navigateur reel ────────────────────────────────────────────
+  //
+  // Airbnb ne livre plus les annonces dans le HTML du profil : la page arrive
+  // vide et se remplit en JavaScript. Mesure faite sur une page reelle depuis
+  // ce projet : requete HTTP = 0 annonce, navigateur = 10 annonces avec leurs
+  // vrais titres. C'est donc la voie principale, et la requete HTTP ci-dessous
+  // n'est plus qu'un repli pour les anciennes pages qui exposent encore des
+  // liens en clair.
+  const browserScan = await scanProfileWithBrowser(profile.urls);
+  if (browserScan.ok && browserScan.listings.length > 0) {
+    const named = browserScan.listings.filter((l) => l.name).length;
+    logger.info(
+      `Airbnb profile scan (navigateur) : ${browserScan.listings.length} annonce(s), ${named} nom(s) lu(s)`
+    );
+    return res.json({
+      success: true,
+      listings: browserScan.listings,
+      total: browserScan.listings.length,
+      named,
+      needs_name: browserScan.listings.length - named,
+      source: 'browser',
+    });
+  }
+
+  // Un mur anti-robot ou un scan deja en cours ne se rattrapent pas par une
+  // requete HTTP : elle echouera pour la meme raison, en pire. On remonte le
+  // motif tel quel pour que l'ecran propose l'export.
+  if (browserScan.reason === 'blocked' || browserScan.reason === 'busy') {
+    return res.status(browserScan.reason === 'busy' ? 429 : 502).json({
+      error:
+        browserScan.reason === 'busy'
+          ? "Une autre recherche d'annonces est en cours. Reessayez dans une minute."
+          : "Airbnb demande une verification anti-robot et n'a pas laisse lire la liste de vos annonces. Utilisez votre export de donnees Airbnb.",
+      code: browserScan.reason === 'busy' ? 'SCAN_BUSY' : 'AIRBNB_BLOCKED',
+    });
+  }
+
+  logger.info(
+    `Airbnb profile scan: navigateur indisponible ou infructueux (${browserScan.reason}${browserScan.detail ? ': ' + browserScan.detail : ''}), repli sur la requete HTTP`
+  );
+
+  let url = profile.urls[0];
+
+  // On tente les deux formes d'adresse avant de conclure : selon la région et
+  // la langue, Airbnb sert l'une ou l'autre, et une seule des deux porte parfois
+  // les liens des annonces.
+  const candidates = [...profile.urls];
+
+  let html = '';
+  let listingIds = [];
+  for (const candidate of candidates) {
+    const check = validateAirbnbUrl(candidate);
+    if (!check.valid) continue;
+
+    const scanResult = await safeFetch(check.url, {
+      timeoutMs: 15000,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+      },
+    });
+    if (!scanResult.ok) {
+      logger.warn(`Profile scan fetch error (${check.url}): ${scanResult.reason}`);
+      continue;
+    }
+
+    const body = scanResult.body || '';
+    if (body.length > html.length) html = body;
+
+    const found = [...new Set(Array.from(body.matchAll(/\/rooms\/(\d{6,})/g), (m) => m[1]))].slice(0, 30);
+    if (found.length > 0) {
+      listingIds = found;
+      html = body;
+      break;
+    }
   }
 
   if (!html || html.length < 500) {
@@ -869,14 +935,25 @@ async function scanAirbnbProfile(req, res) {
     });
   }
 
-  // Extract all unique listing IDs from /rooms/ href patterns
-  const listingIds = [...new Set(
-    Array.from(html.matchAll(/\/rooms\/(\d{6,})/g), m => m[1])
-  )].slice(0, 30);
-
   if (listingIds.length === 0) {
+    // Ce n'est PAS forcément une mauvaise adresse.
+    //
+    // Airbnb a cessé de livrer la liste des annonces d'un hôte dans le HTML du
+    // profil : la page arrive vide et se remplit ensuite dans le navigateur,
+    // par un appel que le serveur ne peut pas rejouer. Vérifié sur une page de
+    // profil réelle — aucun lien /rooms/, aucun __NEXT_DATA__, aucun JSON-LD,
+    // et le titre générique de l'accueil Airbnb.
+    //
+    // Le message doit donc dire la vérité et orienter vers ce qui marche, au
+    // lieu d'accuser l'hôte d'avoir mal copié son adresse.
+    logger.info(`Airbnb profile scan: aucune annonce exposée dans le HTML de ${url}`);
     return res.status(404).json({
-      error: "Aucun logement trouvé sur cette page. Vérifiez que l'URL est celle de votre profil hôte public Airbnb."
+      error:
+        "Aucune annonce n'a pu être lue sur ce profil. Vérifiez que l'adresse est bien celle " +
+        'de votre profil hôte public. Si le problème persiste, Airbnb bloque la lecture depuis ' +
+        'ce serveur : utilisez votre export de données Airbnb, qui ne dépend pas de la lecture ' +
+        "d'une page web.",
+      code: 'PROFILE_LISTINGS_NOT_EXPOSED',
     });
   }
 
@@ -899,13 +976,62 @@ async function scanAirbnbProfile(req, res) {
     }
   } catch (_) {}
 
-  const listings = listingIds.map(id => ({
-    id,
-    name: listingNames[id] || null
-  }));
+  // Nom réel de chaque annonce, résolu depuis SA page.
+  //
+  // Le scan ne lisait que __NEXT_DATA__, un bloc qu'Airbnb ne publie plus sur
+  // les pages de profil : les noms revenaient donc vides, et le client posait à
+  // la place « Logement Airbnb #<id> » — un faux nom, indiscernable d'un vrai
+  // une fois en base. On va chercher le titre là où il existe encore, sur la
+  // fiche de l'annonce, avec la même cascade que l'import d'un seul logement.
+  //
+  // Le coût est borné : au plus MAX_TITLE_LOOKUPS pages, par petits groupes, et
+  // un budget de temps global. Au-delà, l'annonce repart SANS nom plutôt que
+  // d'attendre — le client la présente alors comme à vérifier, jamais comme sûre.
+  const MAX_TITLE_LOOKUPS = 30;
+  const BATCH = 5;
+  const TIME_BUDGET_MS = 25000;
+  const startedAt = Date.now();
 
-  logger.info(`Airbnb profile scan: ${listings.length} listings found`);
-  return res.json({ success: true, listings, total: listings.length });
+  const missing = listingIds.filter((id) => !listingNames[id]).slice(0, MAX_TITLE_LOOKUPS);
+  for (let i = 0; i < missing.length; i += BATCH) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      logger.info('Airbnb profile scan: budget de temps atteint, noms restants non résolus');
+      break;
+    }
+    await Promise.all(
+      missing.slice(i, i + BATCH).map(async (id) => {
+        try {
+          const page = await safeFetch(`https://www.airbnb.fr/rooms/${id}`, {
+            timeoutMs: 8000,
+            headers: { Accept: 'text/html', 'Accept-Language': 'fr-FR,fr;q=0.9' },
+          });
+          if (!page.ok) return;
+          const titled = resolveListingTitle({ html: page.body || '', listingId: id });
+          if (titled.name) listingNames[id] = titled.name;
+        } catch (err) {
+          logger.warn(`Airbnb profile scan: titre non résolu pour ${id}: ${err.message}`);
+        }
+      })
+    );
+  }
+
+  // Un nom qui n'a pas passé la validation ne ressort pas : mieux vaut une
+  // case « nom à saisir » qu'un logement baptisé « Redirection vers … ».
+  const listings = listingIds.map((id) => {
+    const candidate = listingNames[id] || null;
+    const name = candidate && isValidListingName(candidate, id) ? candidate : null;
+    return { id, name, needs_name: !name };
+  });
+
+  const named = listings.filter((l) => l.name).length;
+  logger.info(`Airbnb profile scan: ${listings.length} annonce(s), ${named} nom(s) résolu(s)`);
+  return res.json({
+    success: true,
+    listings,
+    total: listings.length,
+    named,
+    needs_name: listings.length - named,
+  });
 }
 
 // ─── Photo extraction ────────────────────────────────────────────────────────

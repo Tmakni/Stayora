@@ -34,6 +34,7 @@ const {
   shouldReplaceStoredName,
   nameKey,
 } = require('./guestNameExtractor');
+const { extractAirbnbMessageBlocks, fingerprint } = require('./airbnbMessageBlocks');
 
 /**
  * Rend une date au format que la base attend : 'YYYY-MM-DD HH:MM:SS', en UTC.
@@ -860,8 +861,17 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
 
   // Messages already fetched in full format — no extra API calls needed
   const { ids: existingMsgIds, needsHeaders } = await getExistingGmailMessageIds(db, conversationId);
+  // Empreintes du contenu déjà stocké. Sert UNIQUEMENT à reconnaître qu'un bloc
+  // rappelé dans un e-mail plus récent est un message que nous avons déjà : la
+  // déduplication du sync, elle, reste la clé (conversation_id,
+  // gmail_message_id) imposée par la base (migration 020).
+  const storedFingerprints = await loadConversationFingerprints(db, conversationId);
   let newMessages = 0;
   let duplicates = 0;
+  // Messages retrouvés dans l'historique cité d'un e-mail plus récent : ils
+  // n'ont jamais été livrés isolément (ou leur e-mail n'a pas été importé), et
+  // ce sont eux qui rebouchent les trous des conversations existantes.
+  let recoveredFromQuotes = 0;
   // Counted separately from newMessages: only a GUEST message should trigger an
   // automatic reply. Notifications echoing the host's own reply are stored as
   // 'outgoing' and must not make Michel answer itself — that is the loop.
@@ -874,80 +884,53 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
 
   for (let mi = 0; mi < fullMsgs.length; mi++) {
     const fullMsg = fullMsgs[mi];
-    if (existingMsgIds.has(fullMsg.id)) {
-      duplicates++;
-      // Known message — but if it predates the reply-header capture, fill the
-      // headers in from the payload already in hand. COALESCE + the IS NULL
-      // guard make this idempotent, so it is a no-op on every later sync.
-      if (needsHeaders.has(fullMsg.id)) {
-        const h = parseHeaders(fullMsg);
-        if (h['reply-to'] || h['message-id']) {
-          await db.query(
-            `UPDATE messages
-                SET email_reply_to = COALESCE(email_reply_to, ?),
-                    email_message_id = COALESCE(email_message_id, ?),
-                    email_references = COALESCE(email_references, ?),
-                    email_subject = COALESCE(email_subject, ?)
-              WHERE gmail_message_id = ? AND conversation_id = ? AND email_reply_to IS NULL`,
-            [h['reply-to'] || null, h['message-id'] || null, h['references'] || null, h.subject || null, fullMsg.id, conversationId]
-          );
-          needsHeaders.delete(fullMsg.id);
-        }
-      }
-      logger.info(`Gmail sync: skipping duplicate message ${fullMsg.id}`);
-      continue;
-    }
-
     const body = decodedBodies[mi] || '';
-
-    // For Airbnb emails, extract the guest message; for others, use full body
-    let cleanedMessage = isAirbnb
-      ? extractAirbnbMessage(body)
-      : body.replace(/\n{3,}/g, '\n\n').trim();
-    // Fallback: if Airbnb parser returned empty but raw body has content, use raw body
-    if (!cleanedMessage.trim() && body.trim()) {
-      logger.warn(`Gmail sync: Airbnb parser returned empty for ${fullMsg.id}, using raw body`);
-      cleanedMessage = body.replace(/\n{3,}/g, '\n\n').trim();
-    }
-
-    // A message we cannot read is still a message that EXISTS.
-    //
-    // Both "empty MIME body" and "parser returned nothing" used to `continue`,
-    // which dropped the row silently: nothing was stored, so nothing recorded
-    // that Gmail had ever delivered it. That is the bulk of what
-    // scripts/audit-missing-messages.js reports as `corps-vide` / `parser-vide`,
-    // and it is exactly the "il me manque 2 ou 3 messages par conversation"
-    // symptom — the thread reads as complete because the gaps leave no trace.
-    //
-    // Storing a placeholder instead keeps the thread whole: the host sees that
-    // something arrived and can open it in Gmail, the id is recorded so the
-    // message is not reconsidered on every later sync, and the reply headers
-    // (which live in the headers, not the body) are captured as usual.
-    let unreadable = null;
-    if (!cleanedMessage.trim()) {
-      unreadable = body.trim() ? 'parser_empty' : 'empty_body';
-      const subjectHint = (parseHeaders(fullMsg).subject || '').trim();
-      cleanedMessage = subjectHint
-        ? `[Message Airbnb non lisible automatiquement — objet : ${subjectHint}]`
-        : '[Message Airbnb non lisible automatiquement — à consulter dans Gmail]';
-      logger.warn(`Gmail sync: message ${fullMsg.id} illisible (${unreadable}) — enregistré en l'état`);
-    }
-
     const msgHeaders = parseHeaders(fullMsg);
     const msgSenderEmail = extractEmail(msgHeaders.from || '');
     const msgSubject = msgHeaders.subject || '';
 
-    // Determine role:
+    // Reply headers, captured at sync time and never afterwards.
+    //
+    // This is the ONLY place the reply address can legitimately come from: it
+    // is read off a message Gmail actually delivered to this account, for this
+    // conversation. emailReplyService refuses to send anywhere else, so a
+    // client can never nominate a recipient (see 017's header columns).
+    // Airbnb puts a per-thread routing token in Reply-To; From is always the
+    // unusable express@airbnb.com.
+    const emailReplyTo = msgHeaders['reply-to'] || null;
+    const emailMessageId = msgHeaders['message-id'] || null;
+    const emailReferences = msgHeaders['references'] || null;
+
+    // Known message — but if it predates the reply-header capture, fill the
+    // headers in from the payload already in hand. COALESCE + the IS NULL
+    // guard make this idempotent, so it is a no-op on every later sync.
+    if (existingMsgIds.has(fullMsg.id) && needsHeaders.has(fullMsg.id)) {
+      if (emailReplyTo || emailMessageId) {
+        await db.query(
+          `UPDATE messages
+              SET email_reply_to = COALESCE(email_reply_to, ?),
+                  email_message_id = COALESCE(email_message_id, ?),
+                  email_references = COALESCE(email_references, ?),
+                  email_subject = COALESCE(email_subject, ?)
+            WHERE gmail_message_id = ? AND conversation_id = ? AND email_reply_to IS NULL`,
+          [emailReplyTo, emailMessageId, emailReferences, msgHeaders.subject || null, fullMsg.id, conversationId]
+        );
+        needsHeaders.delete(fullMsg.id);
+      }
+    }
+
+    // Determine the role of the mail as a whole:
     // - If sent by the user's own email → outgoing
     // - If from Airbnb: detect whether it's a notification of the HOST's own reply
     //   vs a GUEST message. Airbnb sends both as automated@airbnb.com.
-    let role;
+    // Only used for the parts no role block covers; a block carries its own role.
+    let fallbackRole;
     if (msgSenderEmail === account.email.toLowerCase()) {
-      role = 'outgoing';
+      fallbackRole = 'outgoing';
     } else if (isAirbnb) {
-      role = detectAirbnbMessageRole(msgSubject, body, account.email);
+      fallbackRole = detectAirbnbMessageRole(msgSubject, body, account.email);
     } else {
-      role = 'incoming';
+      fallbackRole = 'incoming';
     }
 
     // Écrit sous forme de chaîne 'YYYY-MM-DD HH:MM:SS', jamais comme objet Date.
@@ -963,86 +946,122 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     // liste. Même effet sur l'ordre des messages d'un fil.
     //
     // UTC des deux côtés : datetime('now') est en UTC, toISOString() aussi.
-    const msgDate = toSqlDateTime(
-      fullMsg.internalDate ? new Date(parseInt(fullMsg.internalDate, 10)) : new Date()
-    );
+    const baseDateMs = fullMsg.internalDate ? parseInt(fullMsg.internalDate, 10) : Date.now();
 
-    // gmail_message_id is written to its own indexed column as well as into
-    // metadata_json: the de-duplication lookup used to read EVERY message row of
-    // the conversation and JSON.parse each one just to find these ids.
-    // Reply headers, captured at sync time and never afterwards.
-    //
-    // This is the ONLY place the reply address can legitimately come from: it
-    // is read off a message Gmail actually delivered to this account, for this
-    // conversation. emailReplyService refuses to send anywhere else, so a
-    // client can never nominate a recipient (see 017's header columns).
-    // Airbnb puts a per-thread routing token in Reply-To; From is always the
-    // unusable express@airbnb.com.
-    const emailReplyTo = msgHeaders['reply-to'] || null;
-    const emailMessageId = msgHeaders['message-id'] || null;
-    const emailReferences = msgHeaders['references'] || null;
+    // UN e-mail Airbnb peut porter PLUSIEURS messages (voir
+    // services/airbnbMessageBlocks.js). buildStorableParts rend donc une liste :
+    // le message que l'e-mail annonce, puis l'historique rappelé sous lui.
+    const parts = buildStorableParts({
+      gmailMessageId: fullMsg.id,
+      body,
+      isAirbnb,
+      subject: msgHeaders.subject || '',
+      fallbackRole,
+      baseDateMs,
+    });
 
-    // The read-then-write above (existingMsgIds) is a decision made on a
-    // snapshot: another importer may insert this same message between that read
-    // and this write. Migration 020 makes the database refuse the second one —
-    // this catch is the other half, turning that refusal into the same "already
-    // known" outcome the in-memory check produces, instead of an exception that
-    // would abort the rest of the thread.
-    //
-    // Concretely: the sync cycle and the reconciliation pass read the same
-    // threads, and a Render deploy briefly runs two processes over one file.
-    try {
-      await db.query(
-      `INSERT INTO messages
-        (conversation_id, role, content, gmail_message_id,
-         email_reply_to, email_message_id, email_references, email_subject,
-         metadata_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        conversationId,
-        role,
-        cleanedMessage,
-        fullMsg.id,
-        emailReplyTo,
-        emailMessageId,
-        emailReferences,
-        msgSubject || null,
-        JSON.stringify({
-          source: 'gmail_sync',
-          gmail_message_id: fullMsg.id,
-          gmail_thread_id: threadId,
-          from: msgHeaders.from,
-          subject: msgHeaders.subject,
-          date: msgHeaders.date,
-          sender_name: displayName,
-          property_name: matchedProperty ? matchedProperty.name : propertyName,
-          ...(unreadable ? { unreadable } : {})
-        }),
-          msgDate
-        ]
-      );
-    } catch (err) {
-      if (isDuplicateMessageError(err)) {
-        // Another importer won the race. Same outcome as finding it in the
-        // snapshot: count it as a duplicate and move on.
+    for (const part of parts) {
+      if (existingMsgIds.has(part.key)) {
         duplicates++;
-        existingMsgIds.add(fullMsg.id);
-        logger.info(`Gmail sync: message ${fullMsg.id} déjà inséré par un autre passage — ignoré`);
         continue;
       }
-      throw err;
-    }
 
-    if (!latestMsgDate || msgDate > latestMsgDate) latestMsgDate = msgDate;
-    // Guard against re-inserting the same id twice within this same thread pass
-    // (Gmail can list a message under more than one thread during a merge).
-    existingMsgIds.add(fullMsg.id);
-    logger.info(`Gmail sync: saved message ${fullMsg.id} (role=${role}) to conversation ${conversationId}`);
-    newMessages++;
-    // A placeholder is a record that something arrived, not a question. Letting
-    // it trigger the automatic reply would have Michel answer a body it could
-    // not read — the host looks at this one.
-    if (role === 'incoming' && !unreadable) newGuestMessages++;
+      // Un bloc rappelé n'est ajouté QUE s'il manque réellement. Comparé au
+      // contenu parce qu'il n'a pas d'identité Gmail propre — c'est le même
+      // message, rendu une seconde fois dans un autre e-mail. La comparaison
+      // est volontairement restreinte aux messages de CETTE conversation et au
+      // même rôle : deux messages identiques venant de deux e-mails distincts
+      // gardent chacun leur ligne, puisqu'ils passent par le chemin primaire.
+      if (part.quoted && quoteAlreadyStored(storedFingerprints, part.role, part.content)) {
+        continue;
+      }
+
+      if (part.unreadable) {
+        logger.warn(`Gmail sync: message ${fullMsg.id} illisible (${part.unreadable}) — enregistré en l'état`);
+      }
+
+      const msgDate = toSqlDateTime(new Date(part.dateMs));
+
+      // The read-then-write above (existingMsgIds) is a decision made on a
+      // snapshot: another importer may insert this same message between that read
+      // and this write. Migration 020 makes the database refuse the second one —
+      // this catch is the other half, turning that refusal into the same "already
+      // known" outcome the in-memory check produces, instead of an exception that
+      // would abort the rest of the thread.
+      //
+      // Concretely: the sync cycle and the reconciliation pass read the same
+      // threads, and a Render deploy briefly runs two processes over one file.
+      try {
+        await db.query(
+          `INSERT INTO messages
+            (conversation_id, role, content, gmail_message_id,
+             email_reply_to, email_message_id, email_references, email_subject,
+             metadata_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            conversationId,
+            part.role,
+            part.content,
+            part.key,
+            // Un bloc rappelé n'a pas d'enveloppe à lui : lui prêter le Reply-To
+            // de l'e-mail qui le cite ferait de lui un déclencheur de réponse
+            // automatique valide (replyContextService filtre sur
+            // email_reply_to IS NOT NULL). Il reste donc sans en-têtes.
+            part.quoted ? null : emailReplyTo,
+            part.quoted ? null : emailMessageId,
+            part.quoted ? null : emailReferences,
+            msgSubject || null,
+            JSON.stringify({
+              source: 'gmail_sync',
+              gmail_message_id: fullMsg.id,
+              gmail_thread_id: threadId,
+              from: msgHeaders.from,
+              subject: msgHeaders.subject,
+              date: msgHeaders.date,
+              sender_name: displayName,
+              property_name: matchedProperty ? matchedProperty.name : propertyName,
+              ...(part.blockIndex !== null ? { block_index: part.blockIndex } : {}),
+              ...(part.sender ? { block_sender: part.sender } : {}),
+              ...(part.quoted ? { recovered_from_quote: true } : {}),
+              ...(part.unreadable ? { unreadable: part.unreadable } : {}),
+            }),
+            msgDate,
+          ]
+        );
+      } catch (err) {
+        if (isDuplicateMessageError(err)) {
+          // Another importer won the race. Same outcome as finding it in the
+          // snapshot: count it as a duplicate and move on.
+          duplicates++;
+          existingMsgIds.add(part.key);
+          logger.info(`Gmail sync: message ${part.key} déjà inséré par un autre passage — ignoré`);
+          continue;
+        }
+        throw err;
+      }
+
+      // Guard against re-inserting the same id twice within this same thread pass
+      // (Gmail can list a message under more than one thread during a merge), and
+      // against two e-mails rappelant le même message historique.
+      existingMsgIds.add(part.key);
+      const fp = fingerprint(part.content);
+      if (fp) storedFingerprints.push({ role: part.role, fp });
+
+      // Seul le message annoncé par l'e-mail fait remonter la conversation :
+      // un bloc rappelé est antérieur, il ne doit pas dater le fil.
+      if (!part.quoted && (!latestMsgDate || msgDate > latestMsgDate)) latestMsgDate = msgDate;
+
+      newMessages++;
+      if (part.quoted) recoveredFromQuotes++;
+      logger.info(`Gmail sync: saved message ${part.key} (role=${part.role}${part.quoted ? ', rappelé' : ''}) to conversation ${conversationId}`);
+
+      // A placeholder is a record that something arrived, not a question. Letting
+      // it trigger the automatic reply would have Michel answer a body it could
+      // not read — the host looks at this one. Un message rappelé n'en déclenche
+      // pas non plus : il est ancien par construction, et l'hôte y a déjà
+      // répondu ailleurs dans le fil.
+      if (part.role === 'incoming' && !part.unreadable && !part.quoted) newGuestMessages++;
+    }
   }
 
   // Touch updated_at once so the conversation floats to the top of the inbox
@@ -1051,6 +1070,12 @@ async function syncGmailThread(userId, accountId, account, gmail, threadId, full
     await db.query(
       'UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?',
       [latestMsgDate, conversationId, userId]
+    );
+  }
+
+  if (recoveredFromQuotes > 0) {
+    logger.info(
+      `Gmail sync thread ${threadId}: ${recoveredFromQuotes} message(s) récupéré(s) dans l'historique cité`
     );
   }
 
@@ -1181,6 +1206,142 @@ async function getExistingGmailMessageIds(db, conversationId) {
   }
 
   return { ids, needsHeaders };
+}
+
+/**
+ * Liste des lignes à écrire pour UN e-mail Gmail.
+ *
+ * Un e-mail Airbnb ne vaut PAS un message. Le gabarit rend chaque message comme
+ * un bloc « nom / rôle / texte », et une notification en porte régulièrement
+ * deux ou trois : celui qu'elle annonce, puis le rappel de ceux qui précèdent.
+ * L'ancien extracteur n'en rendait qu'un — c'est la cause des messages manquants.
+ *
+ * Convention de clé, choisie pour rester compatible avec l'existant :
+ *   - bloc 0        → l'identifiant Gmail nu. Les lignes déjà en base gardent
+ *                     donc exactement leur clé, aucune reprise de données ;
+ *   - blocs suivants → `<idGmail>#<n>`, déterministe, donc rejouable sans
+ *                     doublon sous l'index UNIQUE (conversation_id,
+ *                     gmail_message_id) de la migration 020.
+ *
+ * @returns {Array<{key,role,content,quoted,sender,unreadable,dateMs,blockIndex}>}
+ */
+function buildStorableParts({ gmailMessageId, body, isAirbnb, subject, fallbackRole, baseDateMs }) {
+  const blocks = isAirbnb ? extractAirbnbMessageBlocks(body) : [];
+
+  if (blocks.length > 0) {
+    return blocks.map((block, i) => ({
+      key: i === 0 ? gmailMessageId : `${gmailMessageId}#${i}`,
+      role: block.role,
+      content: block.text,
+      // Le bloc 0 est le message que cet e-mail annonce ; les suivants sont
+      // l'historique rappelé sous lui.
+      quoted: i > 0,
+      sender: block.sender,
+      unreadable: null,
+      // Un bloc rappelé est antérieur au message annoncé : daté juste avant,
+      // il s'insère au bon endroit du fil sans jamais passer devant lui.
+      dateMs: baseDateMs - i * 1000,
+      blockIndex: i,
+    }));
+  }
+
+  // Aucun bloc identifiable (mail non-Airbnb, gabarit inconnu, corps illisible) :
+  // ancien chemin, un e-mail = un message.
+  let content = isAirbnb
+    ? extractAirbnbMessage(body)
+    : body.replace(/\n{3,}/g, '\n\n').trim();
+
+  // Fallback: if the Airbnb parser returned empty but the raw body has content,
+  // use the raw body rather than losing the message.
+  if (!content.trim() && body.trim()) {
+    logger.warn(`Gmail sync: Airbnb parser returned empty for ${gmailMessageId}, using raw body`);
+    content = body.replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // A message we cannot read is still a message that EXISTS.
+  //
+  // Both "empty MIME body" and "parser returned nothing" used to `continue`,
+  // which dropped the row silently: nothing was stored, so nothing recorded
+  // that Gmail had ever delivered it. That is the bulk of what
+  // scripts/audit-missing-messages.js reports as `corps-vide` / `parser-vide`.
+  //
+  // Storing a placeholder instead keeps the thread whole: the host sees that
+  // something arrived and can open it in Gmail, the id is recorded so the
+  // message is not reconsidered on every later sync, and the reply headers
+  // (which live in the headers, not the body) are captured as usual.
+  let unreadable = null;
+  if (!content.trim()) {
+    unreadable = body.trim() ? 'parser_empty' : 'empty_body';
+    const hint = String(subject || '').trim();
+    content = hint
+      ? `[Message Airbnb non lisible automatiquement — objet : ${hint}]`
+      : '[Message Airbnb non lisible automatiquement — à consulter dans Gmail]';
+  }
+
+  return [{
+    key: gmailMessageId,
+    role: fallbackRole,
+    content,
+    quoted: false,
+    sender: null,
+    unreadable,
+    dateMs: baseDateMs,
+    blockIndex: null,
+  }];
+}
+
+/**
+ * Empreintes du contenu déjà stocké dans une conversation.
+ *
+ * Lues une fois par fil : la comparaison ne sert qu'aux blocs rappelés, qui
+ * sont rares, mais la relecture par bloc coûterait une requête par bloc.
+ */
+async function loadConversationFingerprints(db, conversationId) {
+  const rows = await db.query(
+    'SELECT role, content FROM messages WHERE conversation_id = ?',
+    [conversationId]
+  );
+  const out = [];
+  for (const row of rows) {
+    const fp = fingerprint(row.content);
+    if (fp) out.push({ role: row.role, fp });
+  }
+  return out;
+}
+
+// Longueur minimale d'un préfixe commun pour conclure « c'est le même message ».
+// En dessous, seule l'égalité exacte compte : « Merci ! » et « Merci beaucoup »
+// ne doivent pas se confondre.
+const QUOTE_PREFIX_MIN = 40;
+
+/**
+ * Ce bloc rappelé correspond-il à un message déjà présent dans la conversation ?
+ *
+ * La comparaison porte sur le CONTENU parce qu'un bloc rappelé n'a pas
+ * d'identité Gmail propre : c'est le même message, rendu une seconde fois dans
+ * un autre e-mail. Elle est bornée à la conversation courante et au même rôle.
+ *
+ * Le rapprochement par préfixe existe parce que l'ancien extracteur tronquait
+ * les messages sur ses marqueurs de fin : la copie en base est souvent un début
+ * de la version rappelée (ou l'inverse quand c'est la citation qui est coupée).
+ *
+ * Ceci ne remplace PAS la déduplication du sync : deux messages identiques
+ * légitimes venant de deux e-mails différents passent tous deux par le chemin
+ * primaire, gardent chacun leur identifiant Gmail, et donc chacun leur ligne.
+ */
+function quoteAlreadyStored(storedFingerprints, role, content) {
+  const fp = fingerprint(content);
+  if (!fp) return true; // rien d'exploitable à ajouter
+
+  for (const stored of storedFingerprints) {
+    if (stored.role !== role) continue;
+    if (stored.fp === fp) return true;
+
+    const shorter = stored.fp.length <= fp.length ? stored.fp : fp;
+    const longer = stored.fp.length <= fp.length ? fp : stored.fp;
+    if (shorter.length >= QUOTE_PREFIX_MIN && longer.startsWith(shorter)) return true;
+  }
+  return false;
 }
 
 // Cap the stored host-name list: it should hold an owner plus a few co-hosts,
@@ -2360,6 +2521,10 @@ module.exports = {
   // message manquant par cause réelle plutôt que par supposition.
   __extractBody: extractBody,
   __extractAirbnbMessage: extractAirbnbMessage,
+  // Découpage multi-blocs : l'audit doit compter les MESSAGES d'un e-mail,
+  // pas les e-mails, sans quoi un fil amputé se déclare complet.
+  __buildStorableParts: buildStorableParts,
+  __quoteAlreadyStored: quoteAlreadyStored,
   __detectAirbnbMessageRole: detectAirbnbMessageRole,
   // Exposés pour les tests (server/tests/gmailThreadMerge.test.js) et le script
   // de réparation (scripts/repair-split-conversations.js). syncGmailThread

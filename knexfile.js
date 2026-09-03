@@ -26,6 +26,19 @@ const MIGRATIONS = {
   tableName:  'knex_migrations'
 };
 
+// Chemin de l'addon natif a charger.
+//
+// Windows et WSL partagent ici le meme node_modules, ou il ne peut y avoir
+// qu'UN binaire `.node` — celui d'une seule plateforme. Le module ci-dessous
+// garde un binaire par plateforme hors de node_modules et rend celui qui
+// convient ; le dialecte better-sqlite3 de knex transmet `options.nativeBinding`
+// tel quel a `new Database(...)`.
+//
+// Rend null dans le cas normal (production, ou machine a plateforme unique) :
+// le binaire de node_modules est alors le bon et rien ne change.
+const { resolveNativeBinding } = require('./scripts/ensure-native-modules');
+const NATIVE_BINDING = resolveNativeBinding();
+
 const SQLITE_BASE = {
   client: 'better-sqlite3',
   useNullAsDefault: true,
@@ -61,7 +74,7 @@ const MYSQL_POOL = { min: 2, max: 15 };
 function buildProductionConfig() {
   // USE_MEMORY_DB=true → SQLite même en production (utile pour Render free tier)
   if (process.env.USE_MEMORY_DB === 'true') {
-    return { ...SQLITE_BASE, connection: { filename: DB_PATH } };
+    return { ...SQLITE_BASE, connection: { filename: DB_PATH, options: { nativeBinding: NATIVE_BINDING } } };
   }
 
   // Valider les variables obligatoires — échoue tôt avec un message clair
@@ -115,13 +128,13 @@ module.exports = {
   // ─── Développement — SQLite (zéro configuration serveur) ──────────────────
   development: {
     ...SQLITE_BASE,
-    connection: { filename: DB_PATH }
+    connection: { filename: DB_PATH, options: { nativeBinding: NATIVE_BINDING } }
   },
 
   // ─── Test — SQLite en mémoire (isolation parfaite entre tests) ─────────────
   test: {
     ...SQLITE_BASE,
-    connection: ':memory:'
+    connection: { filename: ':memory:', options: { nativeBinding: NATIVE_BINDING } }
   },
 
   // ─── Test MySQL — moteur réel, pour ce que SQLite ne peut pas prouver ──────

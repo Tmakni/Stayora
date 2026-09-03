@@ -41,8 +41,14 @@ export const ConversationItem = memo(function ConversationItem({ conversation, a
 
         <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <PlatformBadge conversation={conversation} />
-          {property && (
-            <span className="truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{property.name}</span>
+          {/* Le nom vient du serveur, joint à la conversation. `property` reste
+              en repli pour les appelants qui le résolvent encore eux-mêmes : la
+              liste chargeait les logements à part, donc le nom manquait tant
+              que cette seconde requête n'était pas revenue. */}
+          {(conversation.property_name || property?.name) && (
+            <span className="truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+              {conversation.property_name || property.name}
+            </span>
           )}
           <StatusBadge status={conversation.booking_status} className="ml-auto" />
         </span>

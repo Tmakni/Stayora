@@ -626,6 +626,11 @@ async function getProperties(req, res) {
              allows_pets, allows_smoking, allows_events,
              address, description, house_rules, auto_reply_enabled, reply_tone,
              city, country, main_photo_url, source, airbnb_listing_id,
+             -- Ecrit par l'import en masse (archive, ou scan d'un lien de
+             -- profil) : ces logements arrivent avec un nom et un lien, rien
+             -- de plus. Sans ce champ dans la liste, l'hote n'avait aucun
+             -- moyen de voir lesquels restaient a completer.
+             import_status,
              created_at, updated_at
       FROM property_profiles
       WHERE user_id = ?
@@ -686,8 +691,9 @@ async function getPropertyById(req, res) {
 async function updateProperty(req, res) {
   try {
     const userId = req.userId;
-    const propertyId = req.params.id;
-    const updates = req.body;
+    const propertyId = validateId(req.params.id);
+    if (!propertyId) return res.status(400).json({ error: 'Identifiant de logement invalide' });
+    const updates = req.body || {};
     const db = getDatabase();
 
     // Récupérer toute la propriété existante pour pouvoir rebuilder context_json
@@ -764,6 +770,12 @@ async function updateProperty(req, res) {
       // Seul context_json, ok on continue quand même
     }
 
+    // updated_at n'etait jamais ecrit : la colonne a un DEFAULT mais pas de
+    // ON UPDATE, donc elle restait figee a la date de creation. C'est aussi ce
+    // que la sauvegarde automatique du formulaire renvoie a l'utilisateur pour
+    // prouver que le serveur a bien confirme.
+    updateFields.push('updated_at = NOW()');
+
     values.push(propertyId, userId);
 
     await db.query(
@@ -771,9 +783,27 @@ async function updateProperty(req, res) {
       values
     );
 
-    logger.info(`Property updated: ${propertyId} by user ${userId}`);
+    // Ne JAMAIS journaliser le corps de la requete : il transporte les codes
+    // d'acces, le mot de passe Wi-Fi et l'emplacement des cles. Seuls les
+    // identifiants et la LISTE des champs touches sont traces.
+    logger.info(
+      `Property updated: ${propertyId} by user ${userId} ` +
+      `(champs: ${Object.keys(updates).join(', ') || 'contexte seul'})`
+    );
 
-    res.json({ message: 'Propriété mise à jour avec succès' });
+    const [fresh] = await db.query(
+      'SELECT updated_at FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, userId]
+    );
+
+    // La reponse ne contient DELIBEREMENT pas le logement complet : le
+    // formulaire ne doit rien avoir a remplacer avec elle. Elle sert uniquement
+    // a confirmer l'ecriture.
+    res.json({
+      message: 'Propriété mise à jour avec succès',
+      id: propertyId,
+      updated_at: fresh ? fresh.updated_at : null,
+    });
   } catch (error) {
     logger.error('Error updating property:', error);
     res.status(500).json({ error: 'Erreur lors de la mise à jour de la propriété' });

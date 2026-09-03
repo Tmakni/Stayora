@@ -37,6 +37,24 @@ export function useUpdateProperty() {
   });
 }
 
+/**
+ * Mise a jour PARTIELLE, employee par la sauvegarde automatique.
+ *
+ * Deux differences volontaires avec useUpdateProperty :
+ *  - le corps ne porte que les champs modifies, jamais le logement entier ;
+ *  - l'invalidation est EXACTE sur ['properties']. Une invalidation par prefixe
+ *    toucherait aussi ['properties', id], donc referait la requete de la fiche
+ *    a chaque frappe enregistree — c'est ce refetch qui, combine a l'ancien
+ *    effet d'hydratation, ecrasait la saisie en cours.
+ */
+export function usePatchProperty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => api.properties.patch(id, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['properties'], exact: true }),
+  });
+}
+
 export function useDeleteProperty() {
   const qc = useQueryClient();
   return useMutation({
@@ -47,6 +65,23 @@ export function useDeleteProperty() {
 
 export function useImportAirbnbListing() {
   return useMutation({ mutationFn: (url) => api.properties.importAirbnb(url) });
+}
+
+/**
+ * Previsualisation d'une archive Airbnb : rien n'est ecrit en base a ce stade.
+ * L'utilisateur voit ce qui a ete detecte avant de decider.
+ */
+export function usePreviewAirbnbArchive() {
+  return useMutation({ mutationFn: (file) => api.properties.previewArchive(file) });
+}
+
+/** Import en masse de la selection issue de la previsualisation. */
+export function useImportAirbnbArchive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (listings) => api.properties.importArchive(listings),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['properties'], exact: true }),
+  });
 }
 
 export function useScanAirbnbProfile() {

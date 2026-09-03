@@ -14,14 +14,17 @@ const OPTION_SOURCES = {
 // options (e.g. "Non renseigné") are remapped to this sentinel and back.
 const EMPTY_SENTINEL = '__none__';
 
-export function DynamicField({ field, value, onChange }) {
+// `onBlur` remonte pour que la sauvegarde automatique parte des qu'un champ
+// perd le focus, sans attendre la temporisation : c'est le geste apres lequel
+// l'utilisateur constatait la disparition de sa saisie.
+export function DynamicField({ field, value, onChange, onBlur }) {
   const options = Array.isArray(field.options) ? field.options : OPTION_SOURCES[field.options] || [];
   const hasEmptyOption = options.some((opt) => opt.value === '');
 
   if (field.type === 'checkbox') {
     return (
       <label className={cn('flex cursor-pointer items-center gap-2 py-1 text-sm text-foreground', field.span === 2 && 'sm:col-span-2')}>
-        <Checkbox checked={!!value} onCheckedChange={(v) => onChange(!!v)} />
+        <Checkbox checked={!!value} onCheckedChange={(v) => { onChange(!!v); onBlur?.(); }} />
         {field.label}
       </label>
     );
@@ -37,7 +40,7 @@ export function DynamicField({ field, value, onChange }) {
       {field.type === 'select' ? (
         <Select
           value={value ? String(value) : hasEmptyOption ? EMPTY_SENTINEL : ''}
-          onValueChange={(v) => onChange(v === EMPTY_SENTINEL ? '' : v)}
+          onValueChange={(v) => { onChange(v === EMPTY_SENTINEL ? '' : v); onBlur?.(); }}
         >
           <SelectTrigger id={field.key}>
             <SelectValue placeholder="Sélectionner…" />
@@ -51,13 +54,14 @@ export function DynamicField({ field, value, onChange }) {
           </SelectContent>
         </Select>
       ) : field.type === 'textarea' ? (
-        <Textarea id={field.key} value={value || ''} onChange={(e) => onChange(e.target.value)} rows={3} />
+        <Textarea id={field.key} value={value || ''} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} rows={3} />
       ) : (
         <Input
           id={field.key}
           type={field.type === 'number' ? 'number' : field.type === 'time' ? 'time' : 'text'}
           value={value ?? ''}
           onChange={(e) => onChange(field.type === 'number' ? e.target.value.replace(/[^0-9.]/g, '') : e.target.value)}
+          onBlur={onBlur}
         />
       )}
       {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}

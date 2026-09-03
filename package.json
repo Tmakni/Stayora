@@ -12,8 +12,8 @@
     "build:client": "npm --prefix client install && npm --prefix client run build",
     "dev:wsl": "bash -c 'source ~/.nvm/nvm.sh && nvm use 20 --silent && npx nodemon server/server.js'",
     "wsl": "wsl.exe -e bash -lc \"source ~/.nvm/nvm.sh && nvm use 20 >/dev/null && cd /mnt/c/home/tom/airbnb-ai-agent && npm start\"",
-    "test": "jest --verbose",
-    "test:watch": "jest --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "db:migrate": "node -e \"const k=require('knex')(require('./knexfile').development); k.migrate.latest().then(([b,m])=>{console.log(m.length?'Migrated: '+m.join(', '):'Already up to date'); k.destroy()})\"",
     "db:rollback": "node -e \"const k=require('knex')(require('./knexfile').development); k.migrate.rollback().then(([b,m])=>{console.log('Rolled back: '+m.join(', ')); k.destroy()})\"",
     "dev:mobile": "node scripts/dev-mobile.js",
@@ -49,12 +49,12 @@
     "mysql2": "^3.6.5",
     "node-ical": "^0.26.0",
     "nodemailer": "^9.0.5",
-    "openai": "^4.20.1"
+    "openai": "^4.20.1",
+    "puppeteer-core": "^23.11.1"
   },
   "devDependencies": {
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",
-    "puppeteer-core": "^23.11.1",
     "supertest": "^6.3.3"
   },
   "jest": {

@@ -22,10 +22,36 @@ async function createConversation(req, res) {
     }
     
     const db = getDatabase();
-    
+
+    // Le logement doit appartenir à l'appelant.
+    //
+    // `property_id` arrive du corps de la requête et était écrit tel quel. Un
+    // compte pouvait donc rattacher SA conversation au logement d'un AUTRE, puis
+    // relire en réponse le nom et le `context_json` de ce logement — mot de
+    // passe Wi-Fi, code d'accès, emplacement des clés — et même les faire
+    // reprendre par le brouillon de Michel. La lecture était non filtrée plus
+    // bas ; on ferme les deux bouts, et celui-ci en premier : une conversation
+    // ne doit jamais porter un identifiant que son propriétaire ne possède pas.
+    let propertyId = null;
+    if (property_id !== undefined && property_id !== null && property_id !== '') {
+      propertyId = validateId(property_id);
+      if (!propertyId) {
+        return res.status(400).json({ error: 'Identifiant de logement invalide' });
+      }
+      const owned = await db.query(
+        'SELECT id FROM property_profiles WHERE id = ? AND user_id = ?',
+        [propertyId, req.userId]
+      );
+      if (owned.length === 0) {
+        // Même réponse que pour un logement inexistant : ne pas révéler qu'un
+        // identifiant est pris par quelqu'un d'autre.
+        return res.status(404).json({ error: 'Logement introuvable' });
+      }
+    }
+
     const result = await db.query(
       'INSERT INTO conversations (user_id, title, booking_status, property_id) VALUES (?, ?, ?, ?)',
-      [req.userId, cleanTitle, status, property_id || null]
+      [req.userId, cleanTitle, status, propertyId]
     );
     
     logger.info(`Conversation created: ${result.insertId} by user ${req.userId}`);
@@ -40,7 +66,7 @@ async function createConversation(req, res) {
         user_id: req.userId,
         title: cleanTitle,
         booking_status: status,
-        property_id: property_id || null
+        property_id: propertyId
       }
     });
   } catch (error) {
@@ -68,10 +94,26 @@ async function getConversations(req, res) {
     //
     // Now: one indexed range scan on (user_id, updated_at) for the page, then
     // one grouped lookup restricted to that page's ids via idx_msg_conv_created.
+    // `property_name` est joint ici plutôt que résolu par le client.
+    //
+    // La liste affichait le nom du logement en recoupant `property_id` avec la
+    // liste des logements déjà chargée à l'écran. Ce recoupement n'existait que
+    // dans la liste : le fil ouvert, lui, n'avait rien, et il suffisait que la
+    // requête des logements ne soit pas encore arrivée pour que le nom
+    // disparaisse. La donnée vient donc du serveur, une fois, avec la
+    // conversation.
+    //
+    // La jointure porte `pp.user_id = c.user_id` EN PLUS du filtre sur la
+    // conversation : c'est ce qui garantit qu'une conversation ne peut pas
+    // afficher le logement d'un autre compte, même si une ligne ancienne porte
+    // encore un `property_id` étranger.
     const conversations = await db.query(
       `SELECT c.id, c.title, c.booking_status, c.property_id, c.guest_name,
-              c.guest_name_source, c.created_at, c.updated_at
+              c.guest_name_source, c.created_at, c.updated_at,
+              pp.name AS property_name
        FROM conversations c
+       LEFT JOIN property_profiles pp
+              ON pp.id = c.property_id AND pp.user_id = c.user_id
        WHERE c.user_id = ?
        ORDER BY c.updated_at DESC
        LIMIT ? OFFSET ?`,
@@ -153,7 +195,12 @@ async function getConversation(req, res) {
     
     // Récupérer messages
     const messages = await db.query(
-      'SELECT id, role, content, metadata_json, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
+      // ORDER BY created_at, id : sans le departage sur id, deux messages
+      // portant la meme date (le cas normal quand un e-mail Airbnb en
+      // contient plusieurs, et quand Airbnb horodate a la seconde) sortent
+      // dans un ordre que SQLite/MySQL ne garantissent pas — le fil se
+      // reordonnait donc d'un rafraichissement a l'autre.
+      'SELECT id, role, content, metadata_json, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC',
       [id]
     );
     
@@ -166,9 +213,13 @@ async function getConversation(req, res) {
     // Récupérer property context si existe
     let propertyContext = null;
     if (conversation.property_id) {
+      // `AND user_id = ?` : le second bout de la fuite décrite dans
+      // createConversation. Même une conversation héritée d'avant le contrôle
+      // de création — ou écrite par une voie de synchronisation — ne peut plus
+      // faire ressortir le logement d'un autre compte.
       const properties = await db.query(
-        'SELECT id, name, context_json FROM property_profiles WHERE id = ?',
-        [conversation.property_id]
+        'SELECT id, name, context_json FROM property_profiles WHERE id = ? AND user_id = ?',
+        [conversation.property_id, req.userId]
       );
       
       if (properties.length > 0) {
@@ -205,6 +256,12 @@ async function getConversation(req, res) {
     return res.json({
       conversation: {
         ...conversation,
+        // Le nom du logement à plat, à côté du contexte complet : l'en-tête du
+        // fil n'a besoin que de lui, et lire `property_context.name` obligeait
+        // chaque appelant à connaître la forme du contexte pour afficher un
+        // libellé. Vaut null quand la conversation n'est rattachée à aucun
+        // logement de CE compte.
+        property_name: propertyContext ? propertyContext.name : null,
         property_context: propertyContext,
         is_airbnb: isAirbnb,
         has_airbnb_api: hasAirbnbAccount && !!conversation.airbnb_thread_id

@@ -6,9 +6,15 @@
  * Pour chaque fil Gmail déjà rattaché à une conversation, compare la liste des
  * message-ids côté Gmail à celle stockée, et classe chaque manquant par cause :
  *
- *   corps-vide        le MIME ne donne aucun texte              (ignoré au sync)
- *   parser-vide       extractAirbnbMessage() ne rend rien       (ignoré au sync)
+ *   corps-vide        le MIME ne donne aucun texte              (placeholder stocké)
+ *   parser-vide       le découpage ne rend rien                 (placeholder stocké)
  *   absent            présent chez Gmail, jamais inséré         (à expliquer)
+ *
+ * IMPORTANT — un e-mail Airbnb peut porter PLUSIEURS messages (blocs
+ * « nom / rôle / texte »). Comparer 1 e-mail à 1 ligne déclarait complet un fil
+ * amputé de 2 ou 3 messages : c'était précisément le symptôme signalé. L'audit
+ * compte donc les MESSAGES extraits (services/airbnbMessageBlocks.js), et
+ * reporte chaque étape de la chaîne séparément.
  *
  * N'écrit rien, n'envoie rien.
  *
@@ -37,7 +43,15 @@ const ONLY_ACCOUNT = accIdx > -1 ? parseInt(process.argv[accIdx + 1], 10) : null
     ONLY_ACCOUNT ? [ONLY_ACCOUNT] : []
   );
 
-  const tally = { threads: 0, gmailMsgs: 0, dbMsgs: 0, missing: 0, emptyBody: 0, parserEmpty: 0, unexplained: 0 };
+  const tally = {
+    threads: 0,          // 1. fils Gmail relus
+    gmailMsgs: 0,        // 2. identifiants renvoyés par Gmail
+    downloaded: 0,       // 3. e-mails effectivement téléchargés en entier
+    extracted: 0,        // 4. messages Airbnb extraits de ces e-mails
+    dbMsgs: 0,           // 5. lignes présentes en base pour ces conversations
+    missing: 0, emptyBody: 0, parserEmpty: 0, unexplained: 0,
+    multiBlockMails: 0,  // e-mails portant plus d'un message
+  };
   const samples = [];
 
   for (const account of accounts) {
@@ -72,6 +86,7 @@ const ONLY_ACCOUNT = accIdx > -1 ? parseInt(process.argv[accIdx + 1], 10) : null
       const gmsgs = data.messages || [];
       tally.threads++;
       tally.gmailMsgs += gmsgs.length;
+      tally.downloaded += gmsgs.filter((m) => m && m.payload).length;
 
       const stored = await db.query(
         'SELECT gmail_message_id FROM messages WHERE conversation_id = ? AND gmail_message_id IS NOT NULL',
@@ -81,9 +96,6 @@ const ONLY_ACCOUNT = accIdx > -1 ? parseInt(process.argv[accIdx + 1], 10) : null
       tally.dbMsgs += storedIds.size;
 
       for (const gm of gmsgs) {
-        if (storedIds.has(gm.id)) continue;
-        tally.missing++;
-
         let body = '';
         try { body = internals.__extractBody ? internals.__extractBody(gm) : ''; } catch (_) {}
         // Repli : décodage minimal si le service n'expose pas son helper
@@ -92,31 +104,49 @@ const ONLY_ACCOUNT = accIdx > -1 ? parseInt(process.argv[accIdx + 1], 10) : null
         const headers = {};
         for (const h of (gm.payload && gm.payload.headers) || []) headers[h.name.toLowerCase()] = h.value;
 
-        let cause;
-        if (!body.trim()) { cause = 'corps-vide'; tally.emptyBody++; }
-        else {
-          const cleaned = internals.__extractAirbnbMessage ? internals.__extractAirbnbMessage(body) : body;
-          if (!String(cleaned).trim()) { cause = 'parser-vide'; tally.parserEmpty++; }
-          else { cause = 'absent'; tally.unexplained++; }
-        }
+        // Étape 4 : découpage réel du sync — un e-mail peut rendre N messages.
+        const parts = internals.__buildStorableParts({
+          gmailMessageId: gm.id,
+          body,
+          isAirbnb: true,
+          subject: headers.subject || '',
+          fallbackRole: 'incoming',
+          baseDateMs: parseInt(gm.internalDate, 10) || Date.now(),
+        });
+        tally.extracted += parts.length;
+        if (parts.length > 1) tally.multiBlockMails++;
 
-        if (samples.length < 25) {
-          samples.push({
-            conv: t.conversation_id,
-            subject: (headers.subject || '').slice(0, 70),
-            date: headers.date,
-            cause,
-            bodyLen: body.length,
-          });
+        for (const part of parts) {
+          if (storedIds.has(part.key)) continue;
+          tally.missing++;
+
+          let cause;
+          if (!body.trim()) { cause = 'corps-vide'; tally.emptyBody++; }
+          else if (part.unreadable) { cause = 'parser-vide'; tally.parserEmpty++; }
+          else { cause = 'absent'; tally.unexplained++; }
+
+          if (samples.length < 25) {
+            samples.push({
+              conv: t.conversation_id,
+              subject: (headers.subject || '').slice(0, 70),
+              date: headers.date,
+              cause,
+              bodyLen: body.length,
+              block: part.blockIndex,
+              quoted: part.quoted,
+            });
+          }
         }
       }
     }
   }
 
   console.log('\n=== RÉSULTAT ===');
-  console.log(`fils audités        : ${tally.threads}`);
-  console.log(`messages chez Gmail : ${tally.gmailMsgs}`);
-  console.log(`messages en base    : ${tally.dbMsgs}`);
+  console.log(`1. fils Gmail relus        : ${tally.threads}`);
+  console.log(`2. identifiants Gmail      : ${tally.gmailMsgs}`);
+  console.log(`3. e-mails téléchargés     : ${tally.downloaded}`);
+  console.log(`4. messages Airbnb extraits: ${tally.extracted}  (dont ${tally.multiBlockMails} e-mail(s) multi-messages)`);
+  console.log(`5. lignes en base          : ${tally.dbMsgs}`);
   console.log(`manquants           : ${tally.missing}`);
   console.log(`  dont corps vide   : ${tally.emptyBody}`);
   console.log(`  dont parser vide  : ${tally.parserEmpty}`);
@@ -124,7 +154,8 @@ const ONLY_ACCOUNT = accIdx > -1 ? parseInt(process.argv[accIdx + 1], 10) : null
 
   console.log('\n=== ÉCHANTILLON ===');
   for (const s of samples) {
-    console.log(`  conv${s.conv} [${s.cause}] len=${s.bodyLen} "${s.subject}"`);
+    const where = s.block === null || s.block === undefined ? '' : ` bloc#${s.block}${s.quoted ? ' (rappelé)' : ''}`;
+    console.log(`  conv${s.conv} [${s.cause}]${where} len=${s.bodyLen} "${s.subject}"`);
   }
 
   process.exit(0);

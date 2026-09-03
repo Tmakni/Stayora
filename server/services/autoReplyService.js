@@ -117,6 +117,24 @@ async function scheduleForConversation({ userId, conversationId, propertyId = nu
     }
     const ctx = resolved.context;
 
+    // Une boite dont la synchronisation est en erreur ne prouve plus rien sur
+    // la completude du fil : le dernier message du voyageur peut tres bien ne
+    // pas etre le dernier qu'il a envoye. Repondre dans cet etat, c'est
+    // repondre a cote — et l'envoi est irreversible, contrairement a l'attente.
+    // Des que le compte repasse a 'idle', le message suivant (ou la passe de
+    // reconciliation) redeclenche la programmation.
+    const accountRows = await db.query(
+      'SELECT sync_status, sync_error FROM gmail_accounts WHERE id = ? AND user_id = ?',
+      [ctx.gmailAccountId, userId]
+    );
+    if (accountRows[0] && accountRows[0].sync_status === 'error') {
+      logger.info(
+        `Reponse auto suspendue pour la conversation ${conversationId} : ` +
+        `la synchronisation du compte Gmail ${ctx.gmailAccountId} est en erreur`
+      );
+      return { scheduled: false, reason: 'sync_error' };
+    }
+
     // Idempotency is keyed on the triggering guest message, so a re-sync of the
     // same mail cannot book a second reply.
     const existing = await queue.existsForTrigger({

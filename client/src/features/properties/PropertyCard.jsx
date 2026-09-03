@@ -1,4 +1,4 @@
-import { Building2, MapPin, MessageSquare, CalendarCheck2, CalendarX2, Sparkles, Pencil, Trash2 } from 'lucide-react';
+import { Building2, MapPin, MessageSquare, CalendarCheck2, CalendarX2, Sparkles, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { PLATFORMS, PROPERTY_TYPES } from '../../lib/constants';
 import { useICalInfo } from '../../hooks/useCalendar';
 import { Button } from '../../components/ui/button';
@@ -9,6 +9,7 @@ export function PropertyCard({ property, conversationCount = 0, onEdit, onDelete
   const connected = icalQuery.data?.connected;
   const typeLabel = PROPERTY_TYPES.find((t) => t.value === property.property_type)?.label || property.property_type;
   const isAirbnb = property.source === 'airbnb' || !!property.airbnb_listing_id;
+  const needsVerification = property.import_status === 'needs_verification';
 
   return (
     <div className="group overflow-hidden rounded-lg border border-border bg-card transition-shadow hover:shadow-card">
@@ -58,6 +59,15 @@ export function PropertyCard({ property, conversationCount = 0, onEdit, onDelete
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {isAirbnb && (
             <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', PLATFORMS.airbnb.bg, PLATFORMS.airbnb.text)}>Airbnb</span>
+          )}
+          {/* Arrivé par un import en masse : le logement n'a qu'un nom et un
+              lien. Michel s'en sert pour répondre aux voyageurs, donc l'hôte
+              doit voir lesquels restent à compléter — sans ce repère, la fiche
+              vide ressemblait à une fiche remplie. */}
+          {needsVerification && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
+              <AlertTriangle className="size-3" /> À compléter
+            </span>
           )}
           <span
             className={cn(

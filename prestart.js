@@ -1,24 +1,18 @@
 /**
- * Ensures the better-sqlite3 native module is compiled for the current platform.
- * Runs as a prestart hook — only rebuilds if the binary doesn't load.
+ * Hook prestart/predev : garantit que les modules natifs sont utilisables sur
+ * la plateforme courante (Windows ou WSL, qui partagent ici le même
+ * node_modules).
+ *
+ * Toute la logique vit dans scripts/ensure-native-modules.js, parce que
+ * server.js l'appelle AUSSI au démarrage : run-server.sh et start-server.sh
+ * lancent `node server/server.js` directement, sans passer par npm, donc ce
+ * hook seul ne suffisait pas — l'erreur ressortait plus loin, déguisée en
+ * « Database connection failed ».
  */
-try {
-  require('better-sqlite3');
-  // Binary loads fine for this platform — nothing to do
-} catch (e) {
-  if (e.message && (e.message.includes('invalid ELF header') || e.message.includes('not a valid Win32 application') || e.message.includes('was compiled against a different'))) {
-    console.log('[prestart] Rebuilding better-sqlite3 for current platform (Node ' + process.version + ')...');
-    require('child_process').execSync('npm rebuild better-sqlite3', { stdio: 'inherit', cwd: __dirname });
-    // Verify the rebuild worked
-    try {
-      delete require.cache[require.resolve('better-sqlite3')];
-      require('better-sqlite3');
-      console.log('[prestart] Rebuild successful.');
-    } catch (e2) {
-      console.error('[prestart] Rebuild failed:', e2.message);
-      process.exit(1);
-    }
-  } else {
-    console.error('[prestart] better-sqlite3 error:', e.message);
-  }
+const { ensureBetterSqlite3 } = require('./scripts/ensure-native-modules');
+
+const result = ensureBetterSqlite3();
+if (!result.ok) {
+  console.error('[prestart] better-sqlite3 inutilisable :', result.error && result.error.message);
+  process.exit(1);
 }

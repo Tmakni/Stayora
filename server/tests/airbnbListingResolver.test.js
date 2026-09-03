@@ -221,3 +221,75 @@ describe('resolveListingTitle — ordered fallbacks', () => {
     expect(resolveListingTitle().name).toBeNull();
   });
 });
+
+/**
+ * Titres qu'Airbnb sert À LA PLACE d'une fiche.
+ *
+ * Constatés en interrogeant réellement Airbnb depuis ce projet : une page de
+ * profil renvoie le titre d'accueil générique, une annonce inexistante renvoie
+ * « 404 Page Not Found - Airbnb », et selon la région une page de redirection
+ * s'intercale, titrée « Redirection vers fr.airbnb.com ». Aucun de ces titres
+ * n'était rejeté : ils s'inscrivaient comme nom de logement, où ils passent
+ * pour de vrais noms — et c'est ce nom que Michel cite ensuite au voyageur.
+ */
+describe('titres de pages intermédiaires Airbnb', () => {
+  const { looksLikeInterstitial } = require('../services/airbnbListingResolver');
+
+  const rejected = [
+    'Redirection vers fr.airbnb.com',
+    'Redirecting to airbnb.com',
+    '404 Page Not Found - Airbnb',
+    'Page introuvable',
+    'Page not found',
+    'Just a moment...',
+    'Attention Required! | Cloudflare',
+    'Checking your browser before accessing airbnb.com',
+    'Airbnb : locations de vacances, cabanes, maisons de plage, logements et expériences uniques',
+    'fr.airbnb.com',
+    'www.airbnb.fr',
+    'https://www.airbnb.fr/rooms/12345678',
+    'Accès refusé',
+  ];
+
+  for (const bad of rejected) {
+    it(`refuse « ${bad} »`, () => {
+      expect(isPlaceholderName(bad, LISTING_ID)).toBe(true);
+    });
+  }
+
+  // Le sens inverse compte autant : un filtre trop large renverrait l'hôte
+  // saisir à la main des noms parfaitement récupérables.
+  const accepted = [
+    'Green Love & Spa - Villa Romantique',
+    'Le Cocon Terracotta',
+    'La Villa Rivière & Spa',
+    'La Planquette',
+    'La Villa Cosy - Proche Bordeaux',
+    'Airbnb Loft in Brooklyn',
+    'Studio 404 rue de la Paix',
+  ];
+
+  for (const good of accepted) {
+    it(`accepte « ${good} »`, () => {
+      expect(isPlaceholderName(good, LISTING_ID)).toBe(false);
+    });
+  }
+
+  it("écarte une page qui se déclare elle-même comme un relais", () => {
+    expect(looksLikeInterstitial('<html><head><meta http-equiv="refresh" content="0; url=https://fr.airbnb.com/"></head><body>x</body></html>'.padEnd(300, ' '))).toBe(true);
+  });
+
+  it("écarte une page dont le titre est une erreur", () => {
+    const page = `<html><head><title>404 Page Not Found - Airbnb</title></head><body>${'x'.repeat(300)}</body></html>`;
+    expect(looksLikeInterstitial(page)).toBe(true);
+  });
+
+  it('garde une vraie fiche', () => {
+    expect(looksLikeInterstitial(FULL_PAGE.padEnd(400, ' '))).toBe(false);
+  });
+
+  it("ne tire aucun nom d'une page de redirection", () => {
+    const page = `<html><head><title>Redirection vers fr.airbnb.com</title></head><body>${'x'.repeat(300)}</body></html>`;
+    expect(resolveListingTitle({ html: page, listingId: LISTING_ID }).name).toBeNull();
+  });
+});

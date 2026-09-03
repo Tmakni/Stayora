@@ -232,10 +232,15 @@ export const FIELD_GROUPS = [
       { key: 'has_toiletries', label: 'Produits de toilette', type: 'checkbox' },
       { key: 'has_towels', label: 'Serviettes fournies', type: 'checkbox' },
       { key: 'has_bidet', label: 'Bidet', type: 'checkbox' },
-      { key: 'shower_type', label: 'Type de douche', type: 'text' },
-      { key: 'hot_water_type', label: 'Type d\u2019eau chaude', type: 'text' },
+      // Retirés du formulaire : « Type de douche », « Type d'eau chaude » et
+      // « Instructions eau chaude ». Aucun voyageur ne pose ces questions, et
+      // les deux premières étaient de surcroît incohérentes — saisies en texte
+      // libre ici, mais lues comme des valeurs codées par promptBuilder.
+      //
+      // Les colonnes ne sont PAS supprimées et promptBuilder continue de les
+      // lire : ce que des hôtes ont déjà rempli reste utilisé pour répondre.
+      // Seule la question disparaît.
       { key: 'towel_change', label: 'Changement des serviettes', type: 'text' },
-      { key: 'hot_water_instructions', label: 'Instructions eau chaude', type: 'textarea', span: 2 },
       { key: 'second_bathroom_details', label: '2ème salle de bain', type: 'textarea', span: 2 },
     ],
   },

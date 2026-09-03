@@ -5,7 +5,10 @@ const logger = require('../utils/logger');
  *
  * Utilise Knex.js comme framework ORM/query-builder.
  * - NODE_ENV=development (ou USE_MEMORY_DB=true) → SQLite persistant (fichier local)
- * - NODE_ENV=production + USE_MEMORY_DB=true     → SQLite (Render free tier / tests)
+ * - NODE_ENV=production + USE_MEMORY_DB=true     → SQLite ; le fichier DOIT etre sur un
+ *   volume persistant, designe par SQLITE_DB_PATH. Sans cette variable, le fichier vit
+ *   dans le conteneur et disparait a chaque deploiement : le demarrage est alors REFUSE
+ *   (server/config/persistence.js), au lieu d'accepter des inscriptions ephemeres.
  * - NODE_ENV=production + USE_MEMORY_DB=false    → MySQL cloud (DB_HOST/DB_USER/DB_NAME requis)
  *
  * Toutes les tables sont créées automatiquement via knex migrate:latest
@@ -27,6 +30,15 @@ async function initDatabase() {
     // migration, so an error tagged 'migration' failed after the database was
     // already reachable — the credentials are not the problem.
     const isMigration = error.stage === 'migration';
+    // Base ephemere en production : ce n'est ni une panne de connexion ni une
+    // migration cassee, c'est un refus DELIBERE de demarrer (voir
+    // config/persistence.js). Le message porte deja la marche a suivre.
+    const isPersistence = error.stage === 'persistence';
+
+    if (isPersistence) {
+      logger.error(error.message);
+      throw error;
+    }
 
     logger.error(`Database ${isMigration ? 'migration' : 'connection'} failed:`, error.message);
 

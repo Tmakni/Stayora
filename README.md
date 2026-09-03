@@ -189,7 +189,9 @@ Le serveur démarre sur `http://localhost:3000`
 | `JWT_SECRET` | Secret JWT | - | **Oui** |
 | `JWT_EXPIRES_IN` | Durée validité JWT | 7d | Non |
 | `OPENAI_API_KEY` | Clé API OpenAI | - | Non* |
-| `USE_MEMORY_DB` | Utiliser DB mémoire | true | Non |
+| `USE_MEMORY_DB` | Sélectionne le chemin SQLite (voir note ci-dessous) | true | Non |
+| `SQLITE_DB_PATH` | Fichier SQLite — **obligatoire en production sur SQLite** | (chemin interne) | Si SQLite en prod |
+| `ALLOW_EPHEMERAL_DB` | Autorise une base éphémère en production (env. jetable) | false | Non |
 | `DB_HOST` | Host MySQL | localhost | Si MySQL |
 | `DB_USER` | User MySQL | root | Si MySQL |
 | `DB_PASSWORD` | Password MySQL | - | Si MySQL |
@@ -198,6 +200,52 @@ Le serveur démarre sur `http://localhost:3000`
 | `RATE_LIMIT_MAX_REQUESTS` | Max requêtes IA/min | 10 | Non |
 
 \* Si pas de clé OpenAI : utilise **templates fallback** automatiquement
+
+### ⚠️ Persistance des données en production
+
+`USE_MEMORY_DB=true` **ne veut pas dire « base en RAM »** : le nom est
+historique et trompeur. Il sélectionne le chemin **SQLite**, c'est-à-dire un
+*fichier*. Toute la question est de savoir **où vit ce fichier**.
+
+`SQLITE_DB_PATH` le désigne. Sans cette variable, `knexfile.js` retombe sur
+`~/.local/share/airbnb-ai-agent/airbnb_ai_agent.db`, un chemin **à l'intérieur
+du conteneur** : il est recréé vide à chaque déploiement, et avec lui
+disparaissent les comptes, les logements, les conversations et les jetons Gmail.
+
+C'est le piège qui se referme en changeant d'hébergeur : `render.yaml` monte un
+disque persistant sur `/data` et pose `SQLITE_DB_PATH` — mais **ce fichier n'est
+lu que par Render**. Sur Railway, Fly ou un Docker nu, il ne s'applique pas.
+
+Depuis `server/config/persistence.js`, l'application **refuse de démarrer** en
+production sur une base éphémère, au lieu d'accepter des inscriptions qu'un
+redéploiement effacera. Deux façons de configurer correctement :
+
+| Hébergeur | À faire |
+|-----------|---------|
+| Render    | Disque persistant monté sur `/data` (déjà dans `render.yaml`) + `SQLITE_DB_PATH=/data/airbnb_ai_agent.db` |
+| Railway   | Créer un **Volume**, le monter sur `/data`, puis `SQLITE_DB_PATH=/data/airbnb_ai_agent.db` |
+| Fly.io    | `fly volumes create`, section `[mounts]` dans `fly.toml`, puis la même variable |
+| MySQL managé | `USE_MEMORY_DB=false` + `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL=true` |
+
+Vérification, sans exposer le moindre secret :
+
+```bash
+curl -s https://<votre-domaine>/api/health
+# {"status":"ok","ready":true,
+#  "database":{"engine":"sqlite","persistent":true,"location":"/data/airbnb_ai_agent.db"}}
+```
+
+Si `persistent` vaut `false`, les données ne survivront pas au prochain
+déploiement. `ALLOW_EPHEMERAL_DB=true` existe uniquement pour les environnements
+volontairement jetables (aperçu de branche, démonstration).
+
+**Sauvegarde avant une migration à risque** — SQLite se sauvegarde par simple
+copie du fichier, à chaud :
+
+```bash
+sqlite3 /data/airbnb_ai_agent.db ".backup '/data/backup-$(date +%F).db'"
+# MySQL : mysqldump --single-transaction -h $DB_HOST -u $DB_USER -p $DB_NAME > backup.sql
+```
 
 ---
 
@@ -219,6 +267,78 @@ Le serveur démarre sur `http://localhost:3000`
    - Configurer contexte propriété (WiFi, check-in, parking, etc.)
    - Cliquer "Générer une réponse IA"
    - Copier ou sauvegarder la réponse
+
+### Importer ses logements Airbnb
+
+Trois voies, de la plus complète à la plus rapide. Aucune ne demande le mot de
+passe Airbnb, et aucune ne passe par une API privée ou par du scraping de
+compte : Airbnb n'ouvre pas son API partenaire à ce projet.
+
+#### 1. Export de données personnelles — recommandé
+
+C'est la source la plus fiable, parce qu'elle vient d'Airbnb et appartient à
+l'hôte.
+
+1. Sur Airbnb : **Compte → Confidentialité et partage → Vos données → Demander
+   vos données personnelles**.
+2. Choisir le format **JSON** (surtout pas HTML ni CSV : ils ne contiennent pas
+   les champs exploitables).
+3. Airbnb envoie un e-mail avec un lien de téléchargement, en général sous 24 à
+   72 h. Le lien expire, donc télécharger sans trop attendre.
+4. Dans l'application : **Logements → Importer mes logements → Déposer mon
+   export Airbnb**.
+5. Déposer **le ZIP tel quel**, ou bien **un fichier `.json`** si l'archive a
+   déjà été décompressée. Les deux fonctionnent : le format est reconnu au
+   contenu du fichier, pas à son extension.
+6. Une prévisualisation affiche le nombre et le nom des logements détectés,
+   tous cochés. **Rien n'est écrit tant que l'import n'est pas validé.**
+7. Un résumé indique les logements ajoutés, mis à jour, déjà présents et en
+   erreur.
+
+Réimporter le même fichier ne duplique rien : la déduplication s'appuie sur
+`UNIQUE(user_id, airbnb_listing_id)`. Un logement dont l'identifiant Airbnb est
+absent n'est pas rejeté et son identifiant n'est pas inventé — il est créé avec
+`import_status = 'needs_verification'`.
+
+Seuls les champs de logement sont lus. Les messages, paiements et données de
+compte que contient aussi l'archive ne sont ni extraits, ni stockés, ni
+journalisés, et aucun fichier temporaire n'est écrit sur le disque du serveur.
+
+> Le format de cet export n'est pas documenté publiquement et évolue. La
+> détection reconnaît un logement à sa *forme*, pas à un chemin de fichier
+> attendu. Si un export réel ne donne rien, la prévisualisation liste les
+> fichiers examinés : envoyer cette liste avec un extrait anonymisé suffit à
+> ajuster la détection.
+
+#### 2. Un lien de profil → tous les logements
+
+Coller l'URL du **profil hôte public** (`https://www.airbnb.fr/users/show/<id>`)
+dans « Importer mes logements ». Les annonces trouvées sur la page s'affichent,
+et **« Importer les N logements »** les crée toutes en une fois.
+
+Cette voie crée chaque logement avec son nom et son lien Airbnb, sans
+télécharger les vingt fiches détaillées : ce serait long et cela échouerait à la
+première limitation d'Airbnb. Les informations se complètent ensuite dans le
+formulaire, ou avec **« Mettre à jour depuis Airbnb »** sur une fiche.
+
+Quand Airbnb masque le titre d'une annonce, le logement est créé avec un
+libellé de repère et marqué **à vérifier** — jamais présenté comme constaté.
+
+#### 3. Un lien d'annonce → un logement complet
+
+Coller l'URL d'une annonce (`https://www.airbnb.fr/rooms/<id>`) : le formulaire
+est prérempli avec ce qui a pu être lu sur la page publique, photos comprises.
+C'est la voie la plus riche, mais un logement à la fois.
+
+#### Limite à connaître
+
+Sans accès à l'API partenaire Airbnb, aucune de ces voies ne garantit
+l'exhaustivité ni la fraîcheur des informations d'annonce. L'export de données
+personnelles est la seule source qui vienne d'Airbnb lui-même ; les deux autres
+lisent une page publique, dont Airbnb peut changer la structure ou restreindre
+l'accès à tout moment.
+
+---
 
 ### Contexte propriété (JSON)
 

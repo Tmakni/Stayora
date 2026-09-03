@@ -55,7 +55,7 @@ async function tryRefreshToken() {
   return refreshPromise;
 }
 
-async function request(path, { method = 'GET', body, params, _retried } = {}) {
+async function request(path, { method = 'GET', body, params, rawBody, rawType, _retried } = {}) {
   const token = getToken();
   let url = path;
   if (params && Object.keys(params).length > 0) {
@@ -71,10 +71,13 @@ async function request(path, { method = 'GET', body, params, _retried } = {}) {
       method,
       credentials: 'include',
       headers: {
-        'Content-Type': 'application/json',
+        // `rawBody` sert au depot d'archive : le fichier part tel quel, sans
+        // enveloppe multipart. Cela evite d'ajouter un analyseur multipart au
+        // serveur et, surtout, tout fichier temporaire sur son disque.
+        'Content-Type': rawBody !== undefined ? (rawType || 'application/octet-stream') : 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (networkErr) {
     throw new ApiError('Connexion impossible. Vérifiez votre réseau.', 0, null);
@@ -82,7 +85,7 @@ async function request(path, { method = 'GET', body, params, _retried } = {}) {
 
   if (res.status === 401 && token && !_retried && !path.startsWith('/api/auth/')) {
     const refreshed = await tryRefreshToken();
-    if (refreshed) return request(path, { method, body, params, _retried: true });
+    if (refreshed) return request(path, { method, body, params, rawBody, rawType, _retried: true });
     clearSession();
     const err = new ApiError('Session expirée. Veuillez vous reconnecter.', 401, null);
     err.sessionExpired = true;
@@ -124,6 +127,26 @@ export const api = {
     get: (id) => request(`/api/properties/${id}`),
     create: (payload) => request('/api/properties', { method: 'POST', body: payload }),
     update: (id, payload) => request(`/api/properties/${id}`, { method: 'PUT', body: payload }),
+    // Mise a jour partielle : un champ absent du corps veut dire « ne pas
+    // modifier ». C'est ce que la sauvegarde automatique du formulaire emploie,
+    // pour qu'une section ne puisse jamais effacer les autres.
+    patch: (id, payload) => request(`/api/properties/${id}`, { method: 'PATCH', body: payload }),
+    // Import en masse depuis les donnees personnelles Airbnb : le ZIP fourni
+    // par Airbnb, ou le fichier JSON qu'il contient si l'hote l'a decompresse.
+    // Deux temps : previsualisation (rien n'est ecrit), puis import de la
+    // selection. Le fichier est poste en corps brut.
+    //
+    // Toujours application/octet-stream, y compris pour un .json : le serveur
+    // reconnait le format au contenu, et un corps annonce application/json
+    // serait capte par l'analyseur JSON global borne a 1 Mo.
+    previewArchive: (file) =>
+      request('/api/properties/import-archive/preview', {
+        method: 'POST',
+        rawBody: file,
+        rawType: 'application/octet-stream',
+      }),
+    importArchive: (listings) =>
+      request('/api/properties/import-archive', { method: 'POST', body: { listings } }),
     remove: (id) => request(`/api/properties/${id}`, { method: 'DELETE' }),
     getCalendar: (id, params) => request(`/api/properties/${id}/calendar`, { params }),
     addCalendarBlock: (id, payload) => request(`/api/properties/${id}/calendar`, { method: 'POST', body: payload }),

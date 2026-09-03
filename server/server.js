@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 
 const config = require('./config/env');
 const { initDatabase } = require('./config/db');
+const { ensureBetterSqlite3 } = require('../scripts/ensure-native-modules');
 const logger = require('./utils/logger');
 
 const authRoutes = require('./routes/auth');
@@ -216,9 +217,24 @@ app.get('/api/health', (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
+  // La cible de la base est exposee ici parce que la question « mes donnees
+  // survivent-elles au deploiement ? » doit avoir une reponse verifiable sans
+  // ouvrir les journaux. Aucun secret n'y figure : ni mot de passe, ni URL de
+  // connexion, seulement le moteur, l'emplacement et le caractere persistant
+  // (voir server/config/persistence.js).
+  let database;
+  try {
+    database = require('./db/database').describeTarget();
+  } catch (_) {
+    database = null;
+  }
+
   return res.json({
     status: isAppReady ? 'ok' : 'starting',
     ready: isAppReady,
+    database: database
+      ? { engine: database.engine, persistent: database.persistent, location: database.location }
+      : undefined,
     timestamp: new Date().toISOString()
   });
 });
@@ -247,6 +263,23 @@ app.use((err, req, res, _next) => {
 // in-process (via supertest) without ever binding a real network port.
 async function initializeApp() {
   try {
+    // Modules natifs AVANT toute ouverture de base.
+    //
+    // better-sqlite3 est compile pour UN systeme, et ce depot se lance tantot
+    // depuis Windows, tantot depuis WSL, sur le meme node_modules. Sans ce
+    // controle, l'incompatibilite ne se voyait qu'au premier acces a la base et
+    // ressortait en « Database connection failed: invalid ELF header » — un
+    // message qui envoie chercher un probleme de connexion inexistant.
+    //
+    // Le hook prestart de package.json ne couvrait pas ce cas : run-server.sh et
+    // start-server.sh appellent `node server/server.js` directement.
+    const native = ensureBetterSqlite3({ log: (m) => logger.info(m) });
+    if (!native.ok) {
+      throw new Error(
+        `Module natif better-sqlite3 inutilisable sur cette plateforme : ${native.error && native.error.message}`
+      );
+    }
+
     await initDatabase();
     isAppReady = true;
     logger.info('Database initialized');

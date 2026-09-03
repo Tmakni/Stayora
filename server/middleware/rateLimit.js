@@ -43,9 +43,27 @@ const importRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Limiteur propre a l'import d'archive.
+//
+// Il ne partage PAS le compteur d'importRateLimiter (5 requetes / 5 min) : ce
+// dernier protege les endpoints qui vont interroger Airbnb, ou chaque appel
+// part sur le reseau. Ici, le cout est local — decompression et lecture JSON en
+// memoire, deja bornees par services/zipReader.js — et le parcours normal
+// enchaine plusieurs appels : previsualisation, correction de la selection,
+// import, puis souvent une seconde archive. Cinq requetes par 5 minutes
+// bloquaient un hote de bonne foi des sa premiere tentative.
+const archiveImportRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: "Trop d'imports d'archive. Patientez quelques minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 module.exports = {
   aiRateLimiter,
   authRateLimiter,
   passwordResetRateLimiter,
   importRateLimiter,
+  archiveImportRateLimiter,
 };

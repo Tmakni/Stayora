@@ -3,6 +3,7 @@ import { ArrowLeft, Info, Loader2, Send, Sparkles, ExternalLink, RotateCw, Check
 import { toast } from 'sonner';
 import { ChatMessage } from './ChatMessage';
 import { AIReplyCard } from './AIReplyCard';
+import { NoReplyNeededCard } from './NoReplyNeededCard';
 import { StatusBadge } from '../../components/shared/StatusBadge';
 import { PlatformBadge } from '../../components/shared/PlatformBadge';
 import { EmptyState } from '../../components/shared/EmptyState';
@@ -33,6 +34,9 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
   const [composerText, setComposerText] = useState('');
   const [draft, setDraft] = useState(null);
   const [draftText, setDraftText] = useState('');
+  // Verdict « ce fil n'attend pas de réponse ». Tenu à part du brouillon : les
+  // deux s'excluent, et le serveur ne renvoie jamais les deux à la fois.
+  const [noReply, setNoReply] = useState(null);
   const scrollRef = useRef(null);
 
   // Synchronous double-submit guards. `isPending` is React state and only
@@ -117,7 +121,12 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
     }
   }
 
-  async function handleGenerateDraft() {
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.force] l'hôte a lu le verdict « aucune réponse
+   *   nécessaire » et demande un brouillon malgré tout.
+   */
+  async function handleGenerateDraft({ force = false } = {}) {
     if (!conversation) return;
     // Each call is a billed model request — never let a double tap fire two.
     if (generatingRef.current) return;
@@ -141,7 +150,20 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
         incoming_message: lastIncoming?.content || conversation.title,
         booking_status: conversation.booking_status,
         property_context: parsedExtra,
+        force,
       });
+
+      // Le serveur a jugé qu'il n'y avait rien à répondre : pas de brouillon,
+      // un motif. On n'ouvre PAS la carte de suggestion — il n'y a rien dedans,
+      // et une zone de texte vide sous un bouton « Envoyer » n'aide personne.
+      if (result.reply_needed === false) {
+        setDraft(null);
+        setDraftText('');
+        setNoReply(result);
+        return;
+      }
+
+      setNoReply(null);
       setDraft(result);
       setDraftText(result.draft_reply || '');
     } catch (err) {
@@ -188,6 +210,15 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{guestDisplayName(conversation)}</p>
+          {/* Le logement concerné, sous le nom du voyageur. Ce sont les deux
+              seules choses à savoir pour répondre, et l'en-tête ne portait que
+              la première : sur un compte à plusieurs logements, il fallait
+              ouvrir le panneau d'informations pour savoir de quel logement on
+              parlait. Vient du serveur avec la conversation, donc jamais
+              recoupé à l'écran et jamais celui d'un autre compte. */}
+          {conversation.property_name && (
+            <p className="truncate text-xs text-muted-foreground">{conversation.property_name}</p>
+          )}
           <div className="flex items-center gap-1.5">
             <PlatformBadge conversation={conversation} />
             <StatusBadge status={conversation.booking_status} />
@@ -280,7 +311,9 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
             onTextChange={setDraftText}
             regenerating={generateDraft.isPending}
             sending={addMessage.isPending || sendAirbnb.isPending}
-            onRegenerate={handleGenerateDraft}
+            // Régénérer relance la vérification : si l'hôte a répondu
+            // entre-temps, il doit le savoir plutôt que recevoir un brouillon.
+            onRegenerate={() => handleGenerateDraft()}
             onCopy={() => {
               navigator.clipboard?.writeText(draftText).catch(() => {});
               toast.success('Copié dans le presse-papiers');
@@ -290,6 +323,15 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
               setDraft(null);
               setDraftText('');
             }}
+          />
+        )}
+
+        {noReply && !draft && (
+          <NoReplyNeededCard
+            verdict={noReply}
+            generating={generateDraft.isPending}
+            onForce={() => handleGenerateDraft({ force: true })}
+            onClose={() => setNoReply(null)}
           />
         )}
 
@@ -308,7 +350,7 @@ export function ConversationThread({ id, onBack, onToggleInfo, extraContext }) {
                 variant="outline"
                 size="sm"
                 className="min-w-0 flex-1 sm:flex-none"
-                onClick={handleGenerateDraft}
+                onClick={() => handleGenerateDraft()}
                 disabled={generateDraft.isPending}
               >
                 {generateDraft.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}

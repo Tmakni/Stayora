@@ -7,3 +7,6 @@ coverage/
 *.swp
 *.swo
 data/
+
+# Binaires natifs compiles par plateforme (Windows / WSL partagent node_modules)
+.native-cache/

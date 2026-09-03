@@ -10,6 +10,7 @@
 const knex = require('knex');
 const path = require('path');
 const logger = require('../utils/logger');
+const { assertPersistentStorage, describeDatabaseTarget } = require('../config/persistence');
 
 let db;   // instance Knex (lazy init via initKnex)
 let isSQLite = false;
@@ -197,6 +198,20 @@ function normalizeMysql(result, isInsert) {
  */
 async function testConnection() {
   const d = initKnex();
+
+  // Verifie AVANT tout que l'application ecrit dans une base qui survit au
+  // deploiement. Place ici, donc avant les migrations et avant la premiere
+  // inscription : migrer un fichier destine a etre efface n'aurait aucun sens,
+  // et l'erreur doit precede toute donnee utilisateur. Voir config/persistence.js.
+  const env = process.env.NODE_ENV || 'development';
+  const envConf = require('../../knexfile')[env] || require('../../knexfile').development;
+  try {
+    assertPersistentStorage(envConf, { isProd: env === 'production' });
+  } catch (err) {
+    err.stage = 'persistence';
+    throw err;
+  }
+
   // Ping minimal
   await d.raw('SELECT 1');
 
@@ -226,9 +241,20 @@ async function close() {
   }
 }
 
+/**
+ * Description non sensible de la base employee — moteur, emplacement,
+ * persistance. Sert au controle de sante ; ne contient jamais d'identifiant.
+ */
+function describeTarget() {
+  const env = process.env.NODE_ENV || 'development';
+  const config = require('../../knexfile');
+  return describeDatabaseTarget(config[env] || config.development);
+}
+
 module.exports = {
   query,
   testConnection,
   close,
+  describeTarget,
   getKnex        // accès direct au client Knex pour les opérations avancées
 };
