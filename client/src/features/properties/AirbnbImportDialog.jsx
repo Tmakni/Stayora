@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Loader2, ArrowLeft, ArrowRight, Check, Upload, AlertTriangle, FileArchive, Home, Building2 } from 'lucide-react';
+import { Loader2, ArrowLeft, ArrowRight, Check, Upload, AlertTriangle, FileArchive, Home, Building2, FileJson } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -13,10 +13,34 @@ import {
   usePreviewAirbnbArchive,
   useImportAirbnbArchive,
 } from '../../hooks/useProperties';
+import { prepareAirbnbUpload } from '../../lib/airbnbZip';
 
-// Borne côté client, alignée sur celle de la route (60 Mo). Refuser tout de
-// suite évite de téléverser 200 Mo pour se voir répondre 413.
-const MAX_ARCHIVE_BYTES = 60 * 1024 * 1024;
+// Ce que la prévisualisation dit avoir trouvé pour un logement, dans l'ordre
+// où on l'affiche. Une ligne n'apparaît que si le fichier correspondant a
+// réellement livré quelque chose pour CE logement.
+const FOUND_LABELS = [
+  ['general', 'Informations générales'],
+  ['address', 'Adresse'],
+  ['capacity', 'Capacité'],
+  ['amenities', 'Équipements'],
+  ['rules', 'Règles'],
+  ['access', 'Arrivée & accès'],
+  ['pricing', 'Tarifs'],
+  ['calendar', 'Calendrier'],
+  ['reservations', 'Séjours à venir'],
+  ['reviews', 'Avis'],
+  ['permits', 'Enregistrement'],
+];
+
+// Clés que la prévisualisation ajoute pour l'affichage seul : elles n'ont rien
+// à faire dans ce qu'on renvoie à l'import.
+const PREVIEW_ONLY_KEYS = ['found', 'already_imported', 'existing_property_id', 'source_file'];
+
+function toImportPayload(listing) {
+  const payload = { ...listing };
+  for (const key of PREVIEW_ONLY_KEYS) delete payload[key];
+  return payload;
+}
 
 export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
   const [step, setStep] = useState('choice');
@@ -35,6 +59,9 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
   const [archive, setArchive] = useState(null);     // résultat de la prévisualisation
   const [selected, setSelected] = useState(() => new Set());
   const [summary, setSummary] = useState(null);
+  // Ouvrir un ZIP de 156 Mo prend quelques secondes : sans ce témoin, le
+  // bouton reste inerte et l'hôte reclique.
+  const [preparing, setPreparing] = useState(false);
   const fileInputRef = useRef(null);
 
   // Guards a double submit: two fast clicks (or Enter held down) used to fire
@@ -58,6 +85,7 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
     setArchive(null);
     setSelected(new Set());
     setSummary(null);
+    setPreparing(false);
     inFlight.current = false;
   }
 
@@ -199,32 +227,33 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
 
   // ── Archive ZIP ──────────────────────────────────────────────────────────
 
-  async function handleArchiveFile(file) {
-    if (!file || inFlight.current) return;
+  /**
+   * Le ZIP complet d'Airbnb, ou des .json choisis un à un.
+   *
+   * L'archive est ouverte ICI, dans le navigateur, et seuls les fichiers de
+   * logement sont téléversés : sur un export réel, 13 Mo au lieu de 156, et
+   * surtout les conversations avec les voyageurs, les virements et la pièce
+   * d'identité ne quittent jamais la machine de l'hôte (voir lib/airbnbZip.js).
+   */
+  async function handleArchiveFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0 || inFlight.current) return;
     setError('');
 
-    // ZIP tel qu'Airbnb le livre, ou le .json qu'il contient si l'hôte l'a
-    // déjà décompressé — le serveur reconnaît le format au contenu.
-    if (!/\.(zip|json)$/i.test(file.name)) {
-      setError("Déposez le fichier ZIP fourni par Airbnb, ou un fichier .json de cet export.");
-      return;
-    }
-    if (file.size > MAX_ARCHIVE_BYTES) {
-      setError('Archive trop volumineuse (maximum 60 Mo).');
-      return;
-    }
-
     inFlight.current = true;
+    setPreparing(true);
     try {
-      const result = await previewArchive.mutateAsync(file);
+      const { blob } = await prepareAirbnbUpload(files);
+      const result = await previewArchive.mutateAsync(blob);
       setArchive(result);
-      // Tout est sélectionné par défaut — sauf ce qui est déjà importé, qui
-      // reste cochable si l'hôte veut le remettre à jour.
+      // Tout est sélectionné par défaut — y compris ce qui est déjà importé,
+      // qui sera mis à jour, et que l'hôte peut décocher.
       setSelected(new Set(result.listings.map((_, i) => i)));
       setStep('archive-preview');
     } catch (err) {
       setError(err.message || "Impossible de lire ce fichier.");
     } finally {
+      setPreparing(false);
       inFlight.current = false;
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -247,13 +276,11 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
 
     inFlight.current = true;
     try {
-      const result = await importArchive.mutateAsync(
-        chosen.map((l) => ({
-          name: l.name,
-          external_listing_id: l.external_listing_id,
-          url: l.url,
-        }))
-      );
+      // La fiche entière repart telle que le serveur l'a normalisée : c'est
+      // elle qui porte la description, l'adresse, la capacité, les équipements
+      // et les tarifs. Le serveur la repasse intégralement à son filtre de
+      // validation avant d'écrire quoi que ce soit.
+      const result = await importArchive.mutateAsync(chosen.map(toImportPayload));
       setSummary(result);
       setStep('archive-summary');
     } catch (err) {
@@ -264,7 +291,7 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
   }
 
   const busy =
-    scanProfile.isPending || importListing.isPending
+    scanProfile.isPending || importListing.isPending || preparing
     || previewArchive.isPending || importArchive.isPending;
 
   return (
@@ -342,14 +369,82 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
           </form>
         )}
 
-        {/* Toutes les annonces. Deux moyens, du plus simple au plus sûr. */}
+        {/* Toutes les annonces.
+            L'export passe en premier : c'est la seule voie qui rend une fiche
+            complète (description, adresse, capacité, équipements, tarifs,
+            calendrier). Le scan de profil, lui, ne rend qu'un nom et un lien —
+            il reste offert pour l'hôte qui n'a pas encore demandé son export,
+            mais ce n'est plus ce qu'on propose d'abord. */}
         {step === 'all' && (
           <div className="space-y-5">
+            <div className="space-y-2.5 rounded-md border border-primary/30 bg-primary/[0.03] p-3.5">
+              <div className="flex items-center gap-2">
+                <FileArchive className="size-4 text-primary" />
+                <h4 className="text-sm font-semibold text-foreground">Importer mon export Airbnb</h4>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Déposez le fichier ZIP complet fourni par Airbnb. Michel détectera
+                automatiquement vos logements et leurs informations.
+              </p>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".zip,.json,application/zip,application/json"
+                className="hidden"
+                onChange={(e) => handleArchiveFiles(e.target.files)}
+              />
+              <Button
+                type="button"
+                className="w-full"
+                disabled={busy}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {preparing || previewArchive.isPending
+                  ? <Loader2 className="animate-spin" />
+                  : <Upload className="size-4" />}
+                Importer mon export Airbnb
+              </Button>
+
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <FileJson className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  Ou sélectionnez plusieurs fichiers JSON&nbsp;: <strong>listings</strong>,{' '}
+                  <strong>listing_pricing</strong>, <strong>listing_calendar</strong>,{' '}
+                  <strong>listing_permits</strong>.
+                </span>
+              </p>
+
+              {preparing ? (
+                <p className="text-xs text-muted-foreground">
+                  Ouverture de l&apos;archive sur votre appareil…
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  L&apos;archive est ouverte <strong>sur votre appareil</strong> : seuls les
+                  fichiers de logement sont envoyés. Vos messages, paiements et pièces
+                  d&apos;identité ne quittent pas votre machine, et rien n&apos;est enregistré
+                  tant que vous n&apos;avez pas validé.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Pour obtenir cet export : Compte → Confidentialité et partage → Vos données,
+                au format <strong>JSON</strong>.
+              </p>
+            </div>
+
             <form className="space-y-3 rounded-md border border-border p-3.5" onSubmit={handleAnalyze}>
               <div className="flex items-center gap-2">
                 <Building2 className="size-4 text-primary" />
-                <h4 className="text-sm font-semibold text-foreground">Méthode 1 — Depuis mon profil Airbnb</h4>
+                <h4 className="text-sm font-semibold text-foreground">
+                  Sinon — depuis mon profil Airbnb
+                </h4>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Sans export sous la main : les logements sont créés avec leur nom et leur
+                lien, à compléter ensuite.
+              </p>
 
               <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
                 <li>Ouvrez l&apos;une de vos annonces sur Airbnb.</li>
@@ -388,47 +483,10 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
                 <p className="text-xs text-muted-foreground">
                   Airbnb charge ses annonces dans le navigateur : Michel ouvre donc réellement
                   la page. Comptez une quinzaine de secondes. Si Airbnb refuse la lecture,
-                  employez la méthode 2.
+                  passez par l&apos;export ci-dessus.
                 </p>
               )}
             </form>
-
-            <div className="space-y-2.5 rounded-md border border-border p-3.5">
-              <div className="flex items-center gap-2">
-                <FileArchive className="size-4 text-primary" />
-                <h4 className="text-sm font-semibold text-foreground">
-                  Méthode 2 — Depuis mon export de données Airbnb
-                </h4>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Demandez vos données personnelles à Airbnb au format <strong>JSON</strong>
-                {' '}(Compte → Confidentialité et partage → Vos données). Déposez ici le ZIP
-                reçu, ou directement un fichier <strong>.json</strong> si vous l&apos;avez
-                déjà décompressé.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".zip,.json,application/zip,application/json"
-                className="hidden"
-                onChange={(e) => handleArchiveFile(e.target.files?.[0])}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                disabled={busy}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {previewArchive.isPending ? <Loader2 className="animate-spin" /> : <Upload className="size-4" />}
-                Déposer mon export Airbnb (.zip ou .json)
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Seuls les logements sont lus. Le reste de l&apos;archive (messages, paiements)
-                n&apos;est ni conservé ni analysé, et rien n&apos;est écrit tant que vous
-                n&apos;avez pas validé.
-              </p>
-            </div>
 
             <DialogFooter>
               <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setStep('choice')}>
@@ -483,6 +541,21 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
                             : 'Sans identifiant Airbnb — à vérifier après import'}
                           {listing.already_imported && ' · déjà présent, sera mis à jour'}
                         </span>
+
+                        {/* Ce qui a réellement été trouvé POUR CE LOGEMENT.
+                            Une ligne absente veut dire que le fichier
+                            correspondant ne parlait pas de lui — on ne promet
+                            rien qu'on n'ait pas lu. */}
+                        {listing.found && (
+                          <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                            {FOUND_LABELS.filter(([key]) => listing.found[key]).map(([key, label]) => (
+                              <span key={key} className="flex items-center gap-1 text-xs text-success">
+                                <Check className="size-3 shrink-0" aria-hidden="true" />
+                                {label}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </span>
                     </label>
                   ))}

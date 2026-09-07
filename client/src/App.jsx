@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from './components/ui/toaster';
 import { AppShell } from './components/layout/AppShell';
 import { MichelMark } from './components/shared/MichelMark';
+import { ChunkErrorBoundary } from './components/shared/ChunkErrorBoundary';
 import { useAuth } from './lib/auth.jsx';
 
 import { LoginPage } from './features/auth/LoginPage';
@@ -44,7 +45,8 @@ function PublicOnlyRoute({ children }) {
 export default function App() {
   return (
     <>
-      <Suspense fallback={<SplashScreen />}>
+      <ChunkErrorBoundary>
+        <Suspense fallback={<SplashScreen />}>
         <Routes>
           <Route
             path="/login"
@@ -92,7 +94,8 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Suspense>
+        </Suspense>
+      </ChunkErrorBoundary>
       <Toaster />
     </>
   );

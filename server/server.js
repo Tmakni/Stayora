@@ -165,12 +165,35 @@ app.use(cookieParser());
 
 // Serve the built React SPA (client/dist — produced by `npm run build` in client/)
 const CLIENT_DIST = path.join(__dirname, '../client/dist');
+// index.html ne doit JAMAIS être mis en cache, les fichiers hachés peuvent
+// l'être pour toujours. La distinction n'est pas un réglage de performance,
+// c'est ce qui empêche une page blanche après chaque déploiement.
+//
+// Ce qui se passait : `maxAge: 7d` + `immutable` s'appliquaient à TOUS les
+// fichiers, index.html compris. `immutable` dit au navigateur de ne même pas
+// revalider. Après un déploiement, un visiteur déjà venu gardait donc son
+// ancien index.html pendant une semaine — un fichier qui référence les noms
+// hachés de l'ANCIEN build (SettingsPage-7PBrr5hB.js). Ces fichiers n'existent
+// plus, le chargement paresseux de la page échoue, React démonte l'arbre, et
+// l'écran devient blanc. Le symptôme frappe une page à la fois, celle dont le
+// morceau de code manque : « je clique sur Paramètres et j'ai une page
+// blanche ».
+//
+// Les noms hachés changent à chaque build, donc un cache long sur eux est sûr
+// par construction : un contenu différent porte forcément un autre nom.
 app.use(express.static(CLIENT_DIST, {
-  maxAge: config.isProd ? '7d' : 0,
   etag: true,
   lastModified: true,
-  immutable: config.isProd,
   dotfiles: 'deny', // Block .env, .git, etc.
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (config.isProd) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
 }));
 
 // API Routes
@@ -242,6 +265,10 @@ app.get('/api/health', (req, res) => {
 // SPA fallback — React Router handles the actual routing client-side
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
+    // Même règle que ci-dessus : c'est par ce chemin qu'arrive tout accès
+    // direct à une route (/settings, /properties…), donc le mettre en cache
+    // reproduirait exactement la panne que l'autre en-tête vient d'écarter.
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(path.join(CLIENT_DIST, 'index.html'));
   } else {
     res.status(404).json({ error: 'Not found' });

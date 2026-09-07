@@ -127,7 +127,11 @@ function formatPropertyContext(context) {
   if (context.max_guests) lines.push(`- Capacité max: ${context.max_guests} personnes`);
   if (context.bedrooms) lines.push(`- Chambres: ${context.bedrooms}`);
   if (context.beds) lines.push(`- Lits: ${context.beds}`);
-  if (context.bathrooms) lines.push(`- Salles de bain: ${context.bathrooms}`);
+  // La colonne est entière alors qu'Airbnb compte les demi-salles d'eau :
+  // c'est la valeur exacte qui est citée au voyageur quand on l'a.
+  if (context.bathrooms_exact || context.bathrooms) {
+    lines.push(`- Salles de bain: ${context.bathrooms_exact || context.bathrooms}`);
+  }
 
   // --- Arrivée, accès & départ ---
   if (context.check_in_time) lines.push(`- Check-in: ${context.check_in_time}`);
@@ -149,6 +153,13 @@ function formatPropertyContext(context) {
   if (context.early_checkin) lines.push(`- Check-in anticipé: ${context.early_checkin}`);
   if (context.late_checkout) lines.push(`- Check-out tardif: ${context.late_checkout}`);
   if (context.checkout_instructions) lines.push(`- Instructions départ: ${context.checkout_instructions}`);
+  // Renseignés par l'import de l'export Airbnb : le manuel de la maison et le
+  // numéro d'enregistrement sont deux questions que les voyageurs posent.
+  if (context.house_manual) lines.push(`- Manuel de la maison: ${context.house_manual}`);
+  if (context.listing_space) lines.push(`- Description de l'espace: ${context.listing_space}`);
+  if (context.listing_notes) lines.push(`- Notes du logement: ${context.listing_notes}`);
+  if (context.host_interaction) lines.push(`- Accueil par l'hôte: ${context.host_interaction}`);
+  if (context.registration_number) lines.push(`- N° d'enregistrement: ${context.registration_number}`);
 
   // --- WiFi & Connectivité ---
   if (context.wifi_name) lines.push(`- Réseau WiFi: ${context.wifi_name}`);

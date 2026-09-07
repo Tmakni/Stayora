@@ -65,7 +65,24 @@ const CONTEXT_ONLY_FIELDS = [
   'has_id_required', 'age_minimum',
   'host_name', 'host_languages', 'host_response_time',
   'cohost_name', 'cohost_phone', 'host_lives',
-  'custom_faq'
+  'custom_faq',
+  // Renseignés par l'import de l'export Airbnb. Champs de CONTEXTE, donc
+  // aucune migration : context_json est un blob de texte.
+  //
+  //   house_manual        listings.json → houseManual
+  //   registration_number listings.json → license, ou listing_permits.json
+  //   listing_space       listings.json → listingDescriptions[].space
+  //   listing_notes       listings.json → listingDescriptions[].notes
+  //   host_interaction    listings.json → listingDescriptions[].interaction
+  //   latitude/longitude  listings.json → lat / lng
+  //   bathrooms_exact     listings.json → bathrooms, valeur non arrondie
+  //   import_sources      traçabilité : quel fichier a fourni quel champ
+  //
+  // Y figurer suffit à être PRÉSERVÉ d'une sauvegarde de formulaire à l'autre,
+  // même quand le formulaire n'affiche pas le champ (c'est le cas de
+  // import_sources, latitude, longitude et bathrooms_exact).
+  'house_manual', 'registration_number', 'listing_space', 'listing_notes',
+  'host_interaction', 'latitude', 'longitude', 'bathrooms_exact', 'import_sources'
 ];
 
 /**
@@ -356,7 +373,19 @@ function buildContextData(f) {
     cohost_phone:        f.cohost_phone         || '',
     host_lives:          f.host_lives           || '',
     // FAQ personnalisées
-    custom_faq:          f.custom_faq           || ''
+    custom_faq:          f.custom_faq           || '',
+    // Import Airbnb
+    house_manual:        f.house_manual         || '',
+    registration_number: f.registration_number  || '',
+    listing_space:       f.listing_space        || '',
+    listing_notes:       f.listing_notes        || '',
+    host_interaction:    f.host_interaction     || '',
+    latitude:            f.latitude             || '',
+    longitude:           f.longitude            || '',
+    // Airbnb compte les demi-salles d'eau ; la colonne, elle, est entière.
+    // C'est cette valeur-ci que promptBuilder cite au voyageur.
+    bathrooms_exact:     f.bathrooms_exact      || '',
+    import_sources:      f.import_sources       || ''
   };
 }
 
@@ -1020,5 +1049,10 @@ module.exports = {
   getCalendar,
   addCalendarBlock,
   deleteCalendarBlock,
-  checkAvailability
+  checkAvailability,
+  // Partagés avec l'import en masse (archiveImportController) : un logement
+  // créé par l'import doit porter EXACTEMENT le même context_json qu'un
+  // logement saisi au formulaire, sinon le formulaire le relit à moitié vide.
+  buildContextData,
+  CONTEXT_ONLY_FIELDS
 };

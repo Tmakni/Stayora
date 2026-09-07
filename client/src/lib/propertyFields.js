@@ -95,6 +95,13 @@ export const FIELD_GROUPS = [
       { key: 'max_guests', label: 'Voyageurs max.', type: 'number', required: true },
       { key: 'city', label: 'Ville', type: 'text' },
       { key: 'country', label: 'Pays', type: 'text' },
+      // Remplis par l'import de l'export Airbnb.
+      // `license` de listings.json, ou `permit_number` de listing_permits.json.
+      { key: 'registration_number', label: 'N° d’enregistrement / meublé', type: 'text', span: 2 },
+      // `listingDescriptions[].space` et `.notes` : deux textes que l'hôte a
+      // écrits sur son annonce et que Michel cite pour répondre.
+      { key: 'listing_space', label: 'Description de l’espace', type: 'textarea', span: 2 },
+      { key: 'listing_notes', label: 'Notes complémentaires', type: 'textarea', span: 2 },
     ],
   },
   {
@@ -127,6 +134,11 @@ export const FIELD_GROUPS = [
       { key: 'early_checkin', label: 'Arrivée anticipée', type: 'textarea' },
       { key: 'late_checkout', label: 'Départ tardif', type: 'textarea' },
       { key: 'checkout_instructions', label: 'Instructions de départ', type: 'textarea', span: 2 },
+      // Rempli par l'import de l'export Airbnb (`houseManual` de listings.json).
+      { key: 'house_manual', label: 'Manuel de la maison', type: 'textarea', span: 2 },
+      // `listingDescriptions[].interaction` : ce que l'hôte a écrit sur sa
+      // disponibilité pendant le séjour.
+      { key: 'host_interaction', label: 'Accueil et disponibilité de l’hôte', type: 'textarea', span: 2 },
     ],
   },
   {

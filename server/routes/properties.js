@@ -24,16 +24,35 @@ router.use(authMiddleware);
 // serait intercepte par le express.json() global de server.js, dont la borne
 // est a 1 Mo, bien en dessous d'un export reel.
 //
-// 60 Mo : un export Airbnb complet tient tres largement dedans, et la borne
-// s'applique AVANT toute lecture. Les bornes de decompression (bombe ZIP) sont
-// posees separement dans zipReader.
+// POURQUOI 200 Mo, ET POURQUOI CE N'EST PAS CE QUI ARRIVE D'HABITUDE
+// ------------------------------------------------------------------
+// L'export Airbnb est livre NON COMPRESSE : 156 Mo sur l'export de reference,
+// dont 70 Mo de conversations et 54 Mo d'historique de navigation. L'ancienne
+// borne a 60 Mo refusait donc l'archive reelle avant meme de l'ouvrir.
+//
+// Le navigateur ouvre desormais l'archive LUI-MEME et n'envoie que les quatre
+// fichiers de logement, soit ~13 Mo (client/src/lib/airbnbZip.js). Cette borne
+// haute ne sert donc qu'au depot direct — curl, ou un client qui n'aurait pas
+// pu pre-filtrer. Elle s'applique AVANT toute lecture ; les bornes de
+// decompression (bombe ZIP) sont posees separement dans zipReader, et la liste
+// blanche de airbnbExport limite ce qui est reellement decompresse.
 router.post(
   '/import-archive/preview',
   archiveImportRateLimiter,
-  express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '60mb' }),
+  express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '200mb' }),
   previewArchive
 );
-router.post('/import-archive', archiveImportRateLimiter, bulkImport);
+// L'import renvoie les fiches NORMALISEES que la previsualisation a rendues :
+// description, adresse, equipements, tarifs et plages de dates bloquees. Sur
+// une quarantaine de logements cela depasse la borne globale de 1 Mo posee
+// dans server.js, qui vise les formulaires. Un analyseur dedie est donc pose
+// ici, et sur cette route seulement.
+router.post(
+  '/import-archive',
+  archiveImportRateLimiter,
+  express.json({ limit: '8mb' }),
+  bulkImport
+);
 
 // Import/scan Airbnb — rate limited (heavy external requests)
 router.post('/import-airbnb', importRateLimiter, importAirbnbListing);

@@ -1,5 +1,11 @@
 const { listEntries, readEntry, ZipError } = require('./zipReader');
 const logger = require('../utils/logger');
+const {
+  parseExportDocuments,
+  parseAirbnbJson,
+  isListingFile,
+  exportKind,
+} = require('./airbnbExport');
 
 /**
  * Lecture des logements dans l'archive de données personnelles Airbnb.
@@ -12,27 +18,31 @@ const logger = require('../utils/logger');
  * livré en ZIP). Aucun scraping, aucune API privée, aucun identifiant Airbnb
  * demandé à l'utilisateur.
  *
- * SUR LA STRUCTURE DE L'ARCHIVE — À LIRE
- * --------------------------------------
- * Le contenu exact de cet export n'est pas documenté publiquement et change
- * avec le temps. Ce module ne SUPPOSE donc aucune arborescence : il parcourt
- * les fichiers JSON de l'archive et reconnaît un logement à sa FORME (un objet
- * portant un nom d'annonce, et si possible un identifiant), quel que soit le
- * chemin ou le nom du fichier qui le contient.
+ * DEUX LECTURES, DANS CET ORDRE
+ * -----------------------------
+ *   1. STRUCTURÉE (`airbnbExport.js`). L'export réel a une forme connue et
+ *      stable : `listings.json` porte les annonces, `listing_pricing.json` les
+ *      tarifs, `listing_calendar.json` le calendrier, `listing_permits.json`
+ *      les enregistrements. C'est de là que vient TOUT le détail d'une fiche —
+ *      description, adresse, capacité, équipements, règles.
  *
- * Cela reste une heuristique. Tant qu'un export réel anonymisé n'a pas été
- * confronté à ce code, la prévisualisation est là précisément pour ça :
- * l'utilisateur voit ce qui a été détecté AVANT que quoi que ce soit soit
- * écrit, et `scannedFiles` permet de dire quels fichiers ont été examinés si
- * rien n'est trouvé.
+ *   2. HEURISTIQUE (ce fichier, plus bas). Si la lecture structurée ne trouve
+ *      rien — export d'un autre millésime, fichier renommé, extrait partiel —
+ *      on retombe sur la reconnaissance à la FORME : un objet qui porte un nom
+ *      d'annonce et quelques indices. Elle ne rend que le nom, l'identifiant
+ *      et le lien, mais elle ne dépend d'aucun nom de fichier.
  *
- * VIE PRIVÉE
- * ----------
- * L'archive contient bien plus que des logements : messages, paiements, données
- * de compte. Seuls les champs listés dans `pickListing` sont extraits ; rien
- * d'autre n'est lu en profondeur, rien d'autre n'est stocké, et aucun contenu
- * de l'archive n'est journalisé — uniquement des décomptes et des noms de
- * fichiers.
+ * L'ordre compte : l'heuristique seule ne voyait qu'une annonce sur cinq de
+ * l'export réel, et sous son surnom interne plutôt que son titre (voir l'en-tête
+ * de `airbnbExport.js`).
+ *
+ * VIE PRIVÉE — LISTE BLANCHE
+ * --------------------------
+ * L'archive contient bien plus que des logements : conversations avec les
+ * voyageurs, virements, pièces d'identité, historique de navigation. Seuls les
+ * fichiers retenus par `isListingFile` sont DÉCOMPRESSÉS ; les autres ne sont
+ * jamais ouverts. Rien n'est écrit sur le disque, et aucun contenu de l'archive
+ * n'est journalisé — uniquement des décomptes et des noms de fichiers.
  */
 
 // Bornes de balayage : une archive légitime tient très largement dedans.
@@ -213,21 +223,35 @@ function extractListingsFromArchive(buffer) {
     );
   }
 
-  // Les fichiers dont le nom évoque une annonce sont examinés d'abord : sur une
-  // archive volumineuse, cela suffit presque toujours et évite de tout lire.
-  const looksRelevant = (name) => /(listing|annonce|logement|propert|room|home)/i.test(name);
-  const ordered = [
-    ...jsonEntries.filter((e) => looksRelevant(e.name)),
-    ...jsonEntries.filter((e) => !looksRelevant(e.name)),
-  ].slice(0, MAX_JSON_FILES);
+  // LISTE BLANCHE. Sur l'export réel, cela ramène 28 fichiers à 4 — et laisse
+  // fermés `messages.json` (70 Mo de conversations), `activity_log.json`,
+  // `payment_processing.json`, `id_verification.json` et le reste. Ces
+  // fichiers ne sont pas seulement écartés du résultat : ils ne sont jamais
+  // décompressés.
+  const relevant = jsonEntries.filter((e) => isListingFile(e.name)).slice(0, MAX_JSON_FILES);
+  if (relevant.length === 0) {
+    throw new ZipError(
+      "Cette archive ne contient aucun fichier de logement (listings.json et compagnie). "
+      + "Vérifiez qu'il s'agit bien de l'export de vos données Airbnb.",
+      'NO_LISTING_FILE'
+    );
+  }
 
-  const collected = [];
+  // Les fichiers structurés connus d'abord : `listings.json` est la source, et
+  // la lire en premier évite de garder les autres en mémoire pour rien si elle
+  // est absente.
+  const ordered = [
+    ...relevant.filter((e) => exportKind(e.name)),
+    ...relevant.filter((e) => !exportKind(e.name)),
+  ];
+
+  const documents = [];
   const scannedFiles = [];
   let bytesRead = 0;
 
   for (const entry of ordered) {
     if (bytesRead >= MAX_JSON_BYTES) {
-      warnings.push('Archive volumineuse : la lecture a été bornée, certains fichiers JSON n\'ont pas été examinés.');
+      warnings.push("Archive volumineuse : la lecture a été bornée, certains fichiers JSON n'ont pas été examinés.");
       break;
     }
 
@@ -243,33 +267,77 @@ function extractListingsFromArchive(buffer) {
       continue;
     }
 
-    let parsed;
     try {
-      parsed = JSON.parse(text);
+      documents.push({ name: entry.name, data: parseAirbnbJson(text) });
+      scannedFiles.push(entry.name);
     } catch (_) {
       warnings.push(`Fichier ignoré (JSON invalide) : ${entry.name}`);
-      continue;
     }
+  }
 
-    const before = collected.length;
-    collectListings(parsed, entry.name, collected);
-    scannedFiles.push(entry.name);
-    if (collected.length > before) {
-      // Décompte uniquement : le CONTENU de l'archive n'est jamais journalisé.
-      logger.info(`Import Airbnb : ${collected.length - before} logement(s) détecté(s) dans ${entry.name}`);
+  const result = readDocuments(documents, warnings);
+  return { ...result, scannedFiles, jsonFiles: jsonEntries.length };
+}
+
+/**
+ * Lecture structurée d'abord, heuristique ensuite.
+ *
+ * Les deux ne sont pas interchangeables : la structurée rend une fiche
+ * complète, l'heuristique un nom et un identifiant. On ne bascule donc sur la
+ * seconde que si la première n'a RIEN trouvé — sur un export d'un autre
+ * millésime, ou sur un extrait que l'hôte a renommé.
+ *
+ * @param {Array<{name: string, data: any}>} documents
+ * @param {string[]} warnings enrichi au passage
+ */
+function readDocuments(documents, warnings) {
+  const structured = parseExportDocuments(documents);
+  warnings.push(...structured.warnings);
+
+  if (structured.listings.length > 0) {
+    const listings = structured.listings.slice(0, MAX_LISTINGS);
+    if (structured.listings.length > MAX_LISTINGS) {
+      warnings.push(`Limite de ${MAX_LISTINGS} logements atteinte : les suivants ont été ignorés.`);
     }
+    // Décompte uniquement : le CONTENU de l'export n'est jamais journalisé.
+    logger.info(
+      `Import Airbnb (lecture structurée) : ${listings.length} logement(s), `
+      + `sources ${Object.entries(structured.sources).filter(([, v]) => v).map(([k]) => k).join(', ') || 'aucune'}`
+    );
+    return { listings, warnings, sources: structured.sources, conflicts: structured.conflicts };
+  }
 
+  const collected = [];
+  for (const document of documents) {
+    collectListings(document.data, document.name, collected);
     if (collected.length >= MAX_LISTINGS) {
       warnings.push(`Limite de ${MAX_LISTINGS} logements atteinte : les suivants ont été ignorés.`);
       break;
     }
   }
 
+  const listings = dedupe(collected).slice(0, MAX_LISTINGS).map((listing) => ({
+    ...listing,
+    // Même forme que la lecture structurée, pour que l'interface n'ait pas à
+    // distinguer les deux. L'heuristique ne rend qu'un nom et un identifiant :
+    // une seule catégorie est donc cochée, et c'est la vérité.
+    found: {
+      general: true, address: false, capacity: false, amenities: false,
+      rules: false, access: false, pricing: false, calendar: false,
+      reviews: false, reservations: false, permits: false,
+    },
+  }));
+
+  logger.info(`Import Airbnb (lecture par forme) : ${listings.length} logement(s) détecté(s)`);
   return {
-    listings: dedupe(collected),
-    scannedFiles,
-    jsonFiles: jsonEntries.length,
+    listings,
     warnings,
+    conflicts: [],
+    sources: {
+      listings: listings.length > 0,
+      pricing: false, calendar: false, permits: false,
+      reviews: false, reservations: false, quickreplies: false,
+    },
   };
 }
 
@@ -303,9 +371,7 @@ function extractListingsFromJson(buffer, fileName = 'export.json') {
 
   let parsed;
   try {
-    // Le BOM que produisent certains éditeurs Windows fait échouer JSON.parse
-    // sur un fichier pourtant valide.
-    parsed = JSON.parse(buffer.toString('utf8').replace(/^﻿/, ''));
+    parsed = parseAirbnbJson(buffer.toString('utf8'));
   } catch (_) {
     throw new ZipError(
       "Ce fichier n'est pas un JSON valide. Déposez le fichier tel qu'Airbnb l'a fourni, ou le ZIP complet.",
@@ -314,21 +380,9 @@ function extractListingsFromJson(buffer, fileName = 'export.json') {
   }
 
   const warnings = [];
-  const collected = [];
-  collectListings(parsed, fileName, collected);
+  const result = readDocuments([{ name: fileName, data: parsed }], warnings);
 
-  if (collected.length >= MAX_LISTINGS) {
-    warnings.push(`Limite de ${MAX_LISTINGS} logements atteinte : les suivants ont été ignorés.`);
-  }
-
-  logger.info(`Import Airbnb (JSON seul) : ${collected.length} logement(s) détecté(s)`);
-
-  return {
-    listings: dedupe(collected).slice(0, MAX_LISTINGS),
-    scannedFiles: [fileName],
-    jsonFiles: 1,
-    warnings,
-  };
+  return { ...result, scannedFiles: [fileName], jsonFiles: 1 };
 }
 
 /** Le tampon est-il une archive ZIP ? (signature locale « PK ») */
@@ -362,6 +416,7 @@ module.exports = {
   extractListingsFromArchive,
   extractListingsFromJson,
   extractListingsFromUpload,
+  readDocuments,
   looksLikeZip,
   // Exposés pour les tests et pour un futur ajustement au vu d'un export réel.
   __pickListing: pickListing,

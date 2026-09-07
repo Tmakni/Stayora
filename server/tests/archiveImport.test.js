@@ -214,15 +214,34 @@ describe('lecture de l\'archive', () => {
     expect(listings[0].external_listing_id).toBe('33333333');
   });
 
-  it("n'extrait rien des données personnelles hors logements", () => {
+  // La garantie a changé de nature : ces fichiers ne sont plus « lus puis
+  // écartés », ils ne sont PLUS OUVERTS DU TOUT (liste blanche de
+  // services/airbnbExport.js). Une archive qui n'en contient pas d'autres est
+  // donc refusée d'emblée, faute de fichier de logement.
+  it("n'ouvre aucun fichier de données personnelles", () => {
     const zip = makeZip({
       'messages/messages.json': JSON.stringify([
         { name: 'Florine', message: 'Bonjour, le parking est-il inclus ?', sent_at: '2026-01-01' },
       ]),
       'payments/payouts.json': JSON.stringify([{ name: 'Virement mars', amount: 1250, currency: 'EUR' }]),
     });
-    const { listings } = extractListingsFromArchive(zip);
-    expect(listings).toEqual([]);
+    expect(() => extractListingsFromArchive(zip)).toThrow(/aucun fichier de logement/i);
+  });
+
+  it("ne retient que les logements quand l'archive mélange tout", () => {
+    const zip = makeZip({
+      'messages.json': JSON.stringify([
+        { name: 'Florine', message: 'Bonjour, le parking est-il inclus ?', bedrooms: 2, city: 'Lyon' },
+      ]),
+      'payment_processing.json': JSON.stringify([{ name: 'Virement mars', amount: 1250, city: 'Paris' }]),
+      'id_verification.json': JSON.stringify([{ name: 'Passeport', country: 'FR', address: 'x' }]),
+      'listings.json': listingsFile([{ id: '77777777', name: 'La Villa Cosy' }]),
+    });
+    const { listings, scannedFiles } = extractListingsFromArchive(zip);
+    expect(listings.map((l) => l.name)).toEqual(['La Villa Cosy']);
+    // Le point qui compte : les autres fichiers n'apparaissent même pas dans
+    // ce qui a été examiné.
+    expect(scannedFiles).toEqual(['listings.json']);
   });
 
   it('déduplique un logement présent dans plusieurs fichiers de l\'archive', () => {
@@ -288,13 +307,15 @@ describe('archives invalides ou dangereuses', () => {
 
   it('un fichier JSON invalide n\'empêche pas de lire les autres', () => {
     const zip = makeZip({
-      'casse.json': '{ ceci n\'est pas du JSON',
+      // Nommé comme un fichier de logement : c'est le seul cas intéressant,
+      // puisqu'un fichier hors liste blanche n'est de toute façon pas ouvert.
+      'listings_casse.json': '{ ceci n\'est pas du JSON',
       'listings.json': listingsFile([{ id: '66666666', name: 'Logement valide' }]),
     });
     const { listings, warnings } = extractListingsFromArchive(zip);
     expect(listings).toHaveLength(1);
     expect(listings[0].name).toBe('Logement valide');
-    expect(warnings.join(' ')).toMatch(/casse\.json/);
+    expect(warnings.join(' ')).toMatch(/listings_casse\.json/);
   });
 });
 
@@ -383,6 +404,27 @@ describe('import de bout en bout', () => {
     const [row] = await db.query(
       'SELECT source_url FROM property_profiles WHERE name = ?',
       [`URL douteuse ${TAG}`]
+    );
+    // L'URL hostile n'est pas enregistrée. Ce qui la remplace n'est pas
+    // « rien » mais l'adresse canonique DÉDUITE de l'identifiant, déjà validé
+    // comme un entier : l'export structuré ne porte pas d'URL d'annonce, et
+    // sans elle le lien vers Airbnb manquerait sur toutes les fiches importées.
+    expect(row.source_url).not.toContain('exemple-malveillant');
+    expect(row.source_url).toBe('https://www.airbnb.fr/rooms/88888888');
+  });
+
+  it("n'invente pas d'URL quand il n'y a pas d'identifiant", async () => {
+    await authed(request(app).post('/api/properties/import-archive'), tokenA)
+      .send({
+        listings: [{
+          name: `Sans identifiant ni URL ${TAG}`,
+          url: 'https://exemple-malveillant.test/rooms/1',
+        }],
+      });
+
+    const [row] = await db.query(
+      'SELECT source_url FROM property_profiles WHERE name = ?',
+      [`Sans identifiant ni URL ${TAG}`]
     );
     expect(row.source_url).toBeNull();
   });
