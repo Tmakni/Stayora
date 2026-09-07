@@ -230,9 +230,6 @@ describe('lecture de l\'archive', () => {
 
   it("ne retient que les logements quand l'archive mélange tout", () => {
     const zip = makeZip({
-      'messages.json': JSON.stringify([
-        { name: 'Florine', message: 'Bonjour, le parking est-il inclus ?', bedrooms: 2, city: 'Lyon' },
-      ]),
       'payment_processing.json': JSON.stringify([{ name: 'Virement mars', amount: 1250, city: 'Paris' }]),
       'id_verification.json': JSON.stringify([{ name: 'Passeport', country: 'FR', address: 'x' }]),
       'listings.json': listingsFile([{ id: '77777777', name: 'La Villa Cosy' }]),
@@ -242,6 +239,28 @@ describe('lecture de l\'archive', () => {
     // Le point qui compte : les autres fichiers n'apparaissent même pas dans
     // ce qui a été examiné.
     expect(scannedFiles).toEqual(['listings.json']);
+  });
+
+  // `messages.json` est désormais ouvert — pour les conversations, et pour rien
+  // d'autre. Il ne doit produire AUCUN logement, y compris quand son contenu
+  // ressemble de loin à une annonce : c'est exactement le piège que
+  // l'heuristique de forme tendrait sans la séparation faite en amont.
+  it("ouvre les conversations sans jamais en tirer un logement", () => {
+    const zip = makeZip({
+      'messages.json': JSON.stringify([
+        { name: 'Florine', message: 'Bonjour, le parking est-il inclus ?', bedrooms: 2, city: 'Lyon' },
+      ]),
+      'listings.json': listingsFile([{ id: '77777777', name: 'La Villa Cosy' }]),
+    });
+    const { listings } = extractListingsFromArchive(zip);
+    expect(listings.map((l) => l.name)).toEqual(['La Villa Cosy']);
+  });
+
+  it("refuse une archive qui n'aurait que des conversations", () => {
+    const zip = makeZip({
+      'messages.json': JSON.stringify([{ messageThreads: [] }]),
+    });
+    expect(() => extractListingsFromArchive(zip)).toThrow(/aucun fichier de logement/i);
   });
 
   it('déduplique un logement présent dans plusieurs fichiers de l\'archive', () => {

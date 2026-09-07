@@ -228,8 +228,11 @@ function fullExportZip(overrides = {}) {
     'listing_permits.json': permitsJson(),
     'reviews.json': reviewsJson(),
     'reservations.json': reservationsJson(),
-    // Présents dans un export réel. Ils ne doivent jamais être ouverts.
+    // Présents dans un export réel. Seul `messages.json` est ouvert, et
+    // uniquement pour les conversations : celui-ci n'a pas la forme attendue,
+    // il ne doit donc RIEN produire — surtout pas un logement « Florine ».
     'messages.json': JSON.stringify([{ name: 'Florine', message: 'Bonjour', bedrooms: 2, city: 'Lyon' }]),
+    // Ceux-là ne doivent jamais être ouverts.
     'payment_processing.json': JSON.stringify([{ name: 'Virement', amount: 1250, city: 'Paris' }]),
     'id_verification.json': JSON.stringify([{ name: 'Passeport', country: 'FR', address: 'secret' }]),
     'activity_log.json': JSON.stringify([{ name: 'Connexion', city: 'Bordeaux', address: 'x' }]),
@@ -302,11 +305,14 @@ describe('prévisualisation du ZIP complet', () => {
     });
   });
 
-  it('n’examine QUE les fichiers de logement', async () => {
+  it('n’examine QUE les fichiers de logement et les conversations', async () => {
     const res = cachedPreview;
+    // `messages.json` figure ici : il est ouvert, pour les conversations et
+    // pour rien d'autre. Les fichiers de paiement, d'identité et d'historique
+    // de navigation, eux, ne sont toujours jamais décompressés.
     expect(res.body.scanned_files.sort()).toEqual([
       'listing_calendar.json', 'listing_permits.json', 'listing_pricing.json',
-      'listings.json', 'reservations.json', 'reviews.json',
+      'listings.json', 'messages.json', 'reservations.json', 'reviews.json',
     ]);
     // Le point qui compte : rien de ce que contiennent les fichiers sensibles
     // ne ressort, pas même sous forme de logement mal détecté.

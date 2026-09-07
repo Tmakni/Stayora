@@ -5,6 +5,9 @@ const { extractListingsFromUpload } = require('../services/airbnbArchiveImport')
 const { ZipError } = require('../services/zipReader');
 const { isPlaceholderName } = require('../services/airbnbListingResolver');
 const { SOURCE_FILES } = require('../services/airbnbExport');
+const {
+  saveFacts, sanitizeFact, autoApplicableValues, markApplied, COLUMN_FACTS,
+} = require('../services/propertyFacts');
 const { buildContextData, CONTEXT_ONLY_FIELDS } = require('./propertyController');
 
 // Les seuls noms de fichiers qu'une provenance a le droit de citer. Le client
@@ -129,6 +132,9 @@ const CONTEXT_FIELDS = new Set(CONTEXT_ONLY_FIELDS);
 // Bornes de l'import du calendrier. Une plage bloquée par logement tient dans
 // une ligne ; 400 couvre plusieurs années de blocages morcelés.
 const MAX_BLOCKS_PER_LISTING = 400;
+// Le vocabulaire des faits compte quatorze clés ; la borne laisse de la marge
+// sans permettre à un client modifié d'envoyer un tableau sans fin.
+const MAX_FACTS_PER_LISTING = 40;
 const BLOCK_SOURCE = 'airbnb_export';
 
 function isUniqueViolation(err) {
@@ -334,6 +340,21 @@ function validateListing(raw) {
   // si cet import parle des réservations.
   listing.reservations = validateReservations(raw.reservations);
 
+  // ── Faits tirés des conversations ─────────────────────────────────────
+  //
+  // Ces faits font l'aller-retour par le client (prévisualisation → import),
+  // donc rien de ce qu'ils portent n'est repris tel quel : `sanitizeFact`
+  // vérifie la clé contre le vocabulaire connu, borne les compteurs et le
+  // score, et refuse un statut inventé. Un client modifié ne peut pas se
+  // fabriquer un fait « VERIFIED » sur une clé arbitraire.
+  listing.facts = (Array.isArray(raw.facts) ? raw.facts : [])
+    .slice(0, MAX_FACTS_PER_LISTING)
+    .map(sanitizeFact)
+    .filter(Boolean)
+    // Le statut VERIFIED se gagne par une confirmation de l'hôte ou par
+    // l'export structuré, jamais par ce qui arrive du réseau.
+    .map((fact) => (fact.status === 'VERIFIED' ? { ...fact, status: 'HIGH_CONFIDENCE' } : fact));
+
   return listing;
 }
 
@@ -407,6 +428,10 @@ async function previewArchive(req, res) {
     // de la source la plus autoritative a été gardée ; ceci dit laquelle a été
     // écartée, pour que le choix soit vérifiable et non subi.
     conflicts: (extracted.conflicts || []).slice(0, 50),
+    // Ce que l'analyse des conversations a réellement traité : des décomptes,
+    // jamais un extrait. Permet à l'interface d'annoncer « 784 conversations
+    // rattachées » plutôt qu'une promesse vague.
+    fact_analysis: extracted.fact_analysis || null,
     warnings: extracted.warnings,
     // Sert uniquement au diagnostic quand rien n'est détecté : ce sont des noms
     // de fichiers de l'archive, pas leur contenu.
@@ -547,6 +572,7 @@ async function importOne(db, userId, listing) {
 
     if (listing.has_calendar) await replaceExportBlocks(db, userId, current.id, listing.blocked_dates);
     await upsertReservations(db, userId, current.id, listing.external_listing_id, listing.reservations);
+    await persistFacts(db, userId, current.id, listing);
     return { status: 'updated', id: current.id };
   }
 
@@ -572,6 +598,7 @@ async function importOne(db, userId, listing) {
     );
     if (listing.has_calendar) await replaceExportBlocks(db, userId, result.insertId, listing.blocked_dates);
     await upsertReservations(db, userId, result.insertId, listing.external_listing_id, listing.reservations);
+    await persistFacts(db, userId, result.insertId, listing);
     return { status: 'created', id: result.insertId };
   } catch (err) {
     // Deux imports simultanés du même ZIP : la base tranche, pas le contrôle
@@ -584,6 +611,91 @@ async function importOne(db, userId, listing) {
       return { status: 'skipped', id: row ? row.id : null, reason: 'Déjà importé.' };
     }
     throw err;
+  }
+}
+
+/**
+ * Enregistre les faits tirés des conversations, et recopie dans la fiche ceux —
+ * et seulement ceux — que leur statut y autorise.
+ *
+ * CE QUI EST ÉCRIT DANS LA FICHE
+ * ------------------------------
+ * Uniquement des faits HIGH_CONFIDENCE, non sensibles, et uniquement là où le
+ * champ est VIDE. Les trois conditions sont vérifiées par
+ * `autoApplicableValues`. Concrètement : jamais un code de boîte à clés, jamais
+ * un mot de passe, jamais par-dessus une valeur venue de `listings.json` ou
+ * saisie par l'hôte.
+ *
+ * Tout le reste — candidats, valeurs instables, changements probables — reste
+ * dans `property_facts` et attend l'écran de vérification. C'est la différence
+ * entre « Michel a trouvé » et « Michel affirme ».
+ *
+ * Un échec ici n'annule pas l'import du logement : les faits sont un
+ * enrichissement, la fiche est le service principal.
+ */
+async function persistFacts(db, userId, propertyId, listing) {
+  const facts = Array.isArray(listing.facts) ? listing.facts : [];
+  if (!propertyId || facts.length === 0) return;
+
+  try {
+    await saveFacts(db, userId, propertyId, facts);
+
+    const [row] = await db.query(
+      'SELECT * FROM property_profiles WHERE id = ? AND user_id = ?',
+      [propertyId, userId]
+    );
+    if (!row) return;
+
+    let context = {};
+    try {
+      context = JSON.parse(row.context_json || '{}');
+    } catch (_) {
+      // Contexte illisible : on ne peut pas savoir quels champs sont déjà
+      // remplis, donc on n'écrit rien plutôt que d'écraser à l'aveugle.
+      return;
+    }
+
+    const applicable = autoApplicableValues(facts, { ...context, ...row });
+    const keys = Object.keys(applicable);
+    if (keys.length === 0) return;
+
+    const columnValues = {};
+    const contextValues = {};
+    for (const key of keys) {
+      if (COLUMN_FACTS.has(key)) columnValues[key] = applicable[key];
+      else contextValues[key] = applicable[key];
+    }
+
+    const fields = [];
+    const values = [];
+    for (const [column, value] of Object.entries(columnValues)) {
+      fields.push(`${column} = ?`);
+      values.push(value);
+    }
+
+    if (Object.keys(contextValues).length > 0) {
+      // Même chemin que l'import structuré : `mergeContext` conserve tout ce
+      // que la fiche portait déjà et repasse par `buildContextData`, sans quoi
+      // le formulaire relirait un contexte de forme différente.
+      fields.push('context_json = ?');
+      values.push(mergeContext(
+        row.context_json,
+        { ...listing, context: { ...listing.context, ...contextValues } },
+        { ...row, ...columnValues }
+      ));
+    }
+
+    fields.push('updated_at = NOW()');
+    values.push(propertyId, userId);
+    await db.query(
+      `UPDATE property_profiles SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`,
+      values
+    );
+
+    await markApplied(db, userId, propertyId, keys);
+    logger.info(`Faits appliqués à la fiche ${propertyId} (user ${userId}) : ${keys.length}`);
+  } catch (err) {
+    logger.warn(`Faits non enregistrés pour le logement ${propertyId} : ${err.message}`);
   }
 }
 

@@ -69,6 +69,25 @@ const EXPORT_FILES = {
 };
 
 /**
+ * Les conversations, ouvertes SÉPARÉMENT et pour un autre usage.
+ *
+ * Elles ne remplissent jamais un champ de la fiche : elles alimentent la
+ * détection de faits candidats (`airbnbMessages.js`), qui exige des preuves
+ * répétées sur plusieurs réservations avant de proposer quoi que ce soit.
+ * D'où une table à part — un fichier de conversations n'est pas une source de
+ * `parseExportDocuments`, et ne doit pas pouvoir le devenir par inadvertance.
+ *
+ *   messages                 le fichier brut d'Airbnb (70 Mo sur l'export de
+ *                            référence). Accepté seulement en dépôt direct.
+ *   airbnb_message_digest    le condensé produit par le navigateur : fils
+ *                            rattachables, messages de l'hôte uniquement.
+ */
+const MESSAGE_FILES = {
+  messages: 'messages',
+  airbnb_message_digest: 'messagedigest',
+};
+
+/**
  * Priorité des sources, de la plus autoritative à la moins.
  *
  * Sert à trancher un conflit sans jamais choisir au hasard : une source plus
@@ -117,11 +136,13 @@ const SENSITIVE_FILE = new RegExp(
  *     l'heuristique de forme.
  * Tout le reste de l'archive n'est jamais décompressé.
  *
- * `messages.json` reste FERMÉ. Il contient des informations utiles noyées dans
- * les conversations avec les voyageurs, mais rien n'y permet d'établir de façon
- * déterministe qu'une phrase décrit le logement plutôt qu'une exception faite à
- * un voyageur précis. `host_quick_replies.json`, lui, est ouvert : ses modèles
- * sont écrits par l'hôte et rattachés explicitement à des annonces.
+ * `messages.json` est désormais OUVERT, ce qui n'était pas le cas auparavant.
+ * Ce qui a changé n'est pas l'appréciation du risque, c'est qu'il existe
+ * maintenant un rattachement DÉTERMINISTE d'une conversation à un logement
+ * (code de réservation → `reservations.json` → annonce, voir
+ * `airbnbMessages.js`) et une chaîne de preuves qui refuse d'écrire quoi que ce
+ * soit sur une seule phrase. Le fichier n'alimente aucun champ directement : il
+ * alimente des faits candidats, comptés puis confirmés.
  */
 const LISTING_FILE = /(listing|annonce|logement|propert)/i;
 
@@ -160,20 +181,33 @@ function parseAirbnbJson(text) {
   return JSON.parse(cleaned.replace(LONG_ID_KEY, '"$1"$2"$3"'));
 }
 
-/** Ce fichier de l'archive doit-il être ouvert ? */
+/**
+ * Ce fichier de l'archive doit-il être ouvert ?
+ *
+ * L'ordre compte : la liste blanche des noms EXACTS est consultée en premier,
+ * parce qu'elle est explicite et tenue à jour à la main. La liste noire ne sert
+ * qu'ensuite, comme filet pour les noms approchants — sans quoi
+ * `messages.json`, autorisé nommément, serait rejeté par le motif « message »
+ * qui existe justement pour bloquer tout le reste.
+ */
 function isListingFile(path) {
   const base = baseName(path);
   if (!/\.json$/i.test(base)) return false;
+  const stem = base.replace(/\.json$/i, '').toLowerCase();
+  if (EXPORT_FILES[stem] || MESSAGE_FILES[stem]) return true;
   if (SENSITIVE_FILE.test(base)) return false;
-  // Un nom exactement connu passe même s'il ne parle pas de « listing ».
-  if (EXPORT_FILES[base.replace(/\.json$/i, '').toLowerCase()]) return true;
   return LISTING_FILE.test(base);
 }
 
 /** Quel parseur structuré s'applique à ce fichier ? `null` = aucun. */
 function exportKind(path) {
   const base = baseName(path).replace(/\.json$/i, '').toLowerCase();
-  return EXPORT_FILES[base] || null;
+  return EXPORT_FILES[base] || MESSAGE_FILES[base] || null;
+}
+
+/** Ce document porte-t-il des conversations plutôt qu'une section de logements ? */
+function isMessageKind(kind) {
+  return kind === 'messages' || kind === 'messagedigest';
 }
 
 /**
@@ -193,6 +227,8 @@ const SECTION_KINDS = [
   ['reviewsReceived', 'reviews'],
   ['reservations', 'reservations'],
   ['templates', 'quickreplies'],
+  ['messageThreads', 'messages'],
+  ['messageDigest', 'messagedigest'],
 ];
 
 function kindFromContent(data) {
@@ -827,6 +863,55 @@ function reservationsByListing(data, { today = new Date(), maxPerListing = 200 }
   return result;
 }
 
+/**
+ * Index de TOUTES les réservations, code de confirmation → logement.
+ *
+ * Différent de `reservationsByListing`, et pour une raison de fond : celui-ci
+ * ne filtre PAS sur les séjours à venir. C'est l'inverse qui est utile ici — ce
+ * sont les séjours PASSÉS qui portent l'historique de conversations, et un
+ * séjour de 2021 rattache aussi sûrement un fil à un logement qu'un séjour de
+ * la semaine prochaine.
+ *
+ * Rien du voyageur n'est retenu : ni nom, ni profil, ni message. Seulement de
+ * quel logement il s'agit et quand.
+ */
+function reservationIndex(data) {
+  const index = new Map();
+  for (const entry of section(data, 'reservations')) {
+    if (!entry || typeof entry !== 'object') continue;
+    const code = text(entry.confirmationCode, 50);
+    const id = listingIdFromUrl(entry.hostingUrl);
+    if (!code || !id || index.has(code)) continue;
+    const start = text(entry.startDate, 10);
+    index.set(code, {
+      listing_id: id,
+      start_date: isIsoDate(start) ? start : null,
+    });
+  }
+  return index;
+}
+
+/**
+ * Identifiants Airbnb de l'hôte, lus dans `listings.json`.
+ *
+ * C'est ce qui permet de distinguer, dans une conversation, ce que l'hôte a
+ * écrit de ce que le voyageur a écrit. Sans cette information, aucun corps de
+ * message n'est retenu : une phrase de voyageur ne doit jamais devenir une
+ * caractéristique du logement.
+ *
+ * `profile_information.json` donnerait la même chose, mais il est sur la liste
+ * noire et le restera : l'identifiant est déjà porté par les annonces.
+ */
+function hostAccountIds(data) {
+  const ids = new Set();
+  for (const row of section(data, 'listings')) {
+    if (!row || typeof row !== 'object') continue;
+    const id = text(row.hostUserId, 32);
+    if (/^\d{3,20}$/.test(id)) ids.add(id);
+  }
+  return ids;
+}
+
 // ── host_quick_replies.json → source SECONDAIRE, sous conditions ────────────
 
 /**
@@ -1063,7 +1148,11 @@ module.exports = {
   parseAirbnbJson,
   isListingFile,
   exportKind,
+  isMessageKind,
+  reservationIndex,
+  hostAccountIds,
   EXPORT_FILES,
+  MESSAGE_FILES,
   SENSITIVE_FILE,
   SOURCE_FILES,
   SOURCE_PRIORITY,

@@ -16,6 +16,14 @@
  * n'envoie que les fichiers utiles : le reste ne quitte jamais la machine de
  * l'hôte.
  *
+ * `messages.json` est le cas intermédiaire. Michel en tire des informations
+ * réelles (heure d'arrivée, emplacement du parking, procédure d'accès), mais
+ * n'a besoin ni des messages des voyageurs, ni des fils qui ne mènent à aucune
+ * réservation. Il est donc ouvert ici, RÉDUIT à un condensé de quelques
+ * mégaoctets — les messages de l'hôte, et rien d'autre — puis relâché. Sur
+ * l'export de référence : 70,8 Mo lus, 3,3 Mo envoyés, aucun texte de voyageur
+ * parmi eux.
+ *
  * Ce n'est pas la seule barrière. Le serveur applique la MÊME liste blanche à
  * sa réception (`services/airbnbExport.js`) : un client modifié qui enverrait
  * l'archive entière n'obtiendrait pas pour autant que les fichiers sensibles
@@ -32,6 +40,8 @@
  * format d'entrée côté serveur, et donc qu'un seul chemin à maintenir.
  */
 
+import { buildMessageDigest, DIGEST_FILE } from './airbnbMessageDigest';
+
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
@@ -45,6 +55,10 @@ const METHOD_DEFLATE = 8;
 export const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;  // le ZIP déposé
 export const MAX_UPLOAD_BYTES = 60 * 1024 * 1024;     // ce qui part au serveur
 const MAX_ENTRY_BYTES = 48 * 1024 * 1024;             // un fichier extrait
+// `messages.json` fait 70 Mo sur l'export de référence. Il est extrait ICI puis
+// réduit à quelques mégaoctets AVANT tout envoi (voir airbnbMessageDigest.js) :
+// la borne haute vaut donc pour la lecture en mémoire, pas pour le téléversement.
+const MAX_MESSAGE_ENTRY_BYTES = 220 * 1024 * 1024;
 const MAX_ENTRIES = 20000;
 
 /**
@@ -66,6 +80,17 @@ const EXACT = new Set([
 const SENSITIVE = /(activity_log|message|payment|payout|kyc|id_verification|search_|profile_information|wishlist|coupon|referral|report_history|resolution|support)/i;
 const USEFUL = /(listing|annonce|logement|propert)/i;
 
+/**
+ * `messages.json` est lu, mais N'EST JAMAIS TÉLÉVERSÉ TEL QUEL.
+ *
+ * Il est ouvert ici, réduit à un condensé (fils rattachables, messages de
+ * l'hôte seulement) et c'est ce condensé qui part. Le fichier d'origine, avec
+ * les messages des voyageurs, ne quitte pas la machine. C'est pour cela qu'il
+ * n'est pas dans `EXACT` : y figurer le ferait recopier intact dans l'archive
+ * envoyée.
+ */
+const MESSAGES_FILE = 'messages.json';
+
 function baseName(path) {
   return String(path).split(/[\\/]/).pop();
 }
@@ -76,6 +101,10 @@ export function isUsefulExportFile(path) {
   if (EXACT.has(base.toLowerCase())) return true;
   if (SENSITIVE.test(base)) return false;
   return USEFUL.test(base);
+}
+
+export function isMessagesFile(path) {
+  return baseName(path).toLowerCase() === MESSAGES_FILE;
 }
 
 export class ArchiveError extends Error {
@@ -160,7 +189,8 @@ async function readCentralDirectory(file) {
 
 /** Décompresse UNE entrée, en mémoire. */
 async function readEntry(file, entry) {
-  if (entry.uncompressedSize > MAX_ENTRY_BYTES) {
+  const limit = isMessagesFile(entry.name) ? MAX_MESSAGE_ENTRY_BYTES : MAX_ENTRY_BYTES;
+  if (entry.uncompressedSize > limit) {
     throw new ArchiveError(`Fichier trop volumineux dans l'archive : ${baseName(entry.name)}.`);
   }
 
@@ -181,7 +211,9 @@ async function readEntry(file, entry) {
     }
     const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-    if (bytes.length > MAX_ENTRY_BYTES) {
+    // La taille annoncée par le sommaire peut mentir : c'est APRÈS
+    // décompression qu'on la vérifie pour de bon (bombe ZIP).
+    if (bytes.length > limit) {
       throw new ArchiveError(`Fichier trop volumineux dans l'archive : ${baseName(entry.name)}.`);
     }
     return bytes;
@@ -303,14 +335,23 @@ export async function prepareAirbnbUpload(files) {
 
   const useful = [];
   let skipped = 0;
+  // Gardé à part : ce fichier ne rejoint jamais l'archive envoyée, seul son
+  // condensé le fait.
+  let messagesBytes = null;
 
   for (const file of list) {
     if (await looksLikeZip(file)) {
       const entries = await readCentralDirectory(file);
       for (const entry of entries) {
+        if (isMessagesFile(entry.name)) {
+          if (!messagesBytes) messagesBytes = await readMessagesEntry(file, entry);
+          continue;
+        }
         if (!isUsefulExportFile(entry.name)) { skipped++; continue; }
         useful.push({ name: baseName(entry.name), bytes: await readEntry(file, entry) });
       }
+    } else if (isMessagesFile(file.name)) {
+      if (!messagesBytes) messagesBytes = new Uint8Array(await file.arrayBuffer());
     } else if (isUsefulExportFile(file.name)) {
       useful.push({ name: baseName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) });
     } else {
@@ -325,6 +366,23 @@ export async function prepareAirbnbUpload(files) {
     );
   }
 
+  // Réduction des conversations. Best effort : si elle échoue, ou si l'export
+  // n'a pas de conversations, les logements partent quand même — ils sont le
+  // service principal, les conversations un enrichissement.
+  const listingsFile = useful.find((f) => f.name.toLowerCase() === 'listings.json');
+  let digest = null;
+  if (messagesBytes && listingsFile) {
+    try {
+      digest = buildMessageDigest(messagesBytes, listingsFile.bytes);
+    } catch (_) {
+      digest = null;
+    }
+    // Le fichier d'origine est relâché immédiatement : il n'a plus aucune
+    // raison de rester en mémoire, et il pèse 70 Mo.
+    messagesBytes = null;
+    if (digest) useful.push({ name: DIGEST_FILE, bytes: digest.bytes });
+  }
+
   const blob = buildStoredZip(useful);
   if (blob.size > MAX_UPLOAD_BYTES) {
     throw new ArchiveError(
@@ -332,5 +390,24 @@ export async function prepareAirbnbUpload(files) {
     );
   }
 
-  return { blob, files: useful.map((f) => f.name), skipped };
+  return {
+    blob,
+    files: useful.map((f) => f.name),
+    skipped,
+    messages: digest
+      ? { threads: digest.threads, threads_seen: digest.threadsSeen, host_messages: digest.hostMessages }
+      : null,
+  };
+}
+
+/**
+ * Lecture de `messages.json`. Un échec n'est pas une erreur d'archive : c'est
+ * un fichier qu'on n'exploitera pas, et l'import continue sans lui.
+ */
+async function readMessagesEntry(file, entry) {
+  try {
+    return await readEntry(file, entry);
+  } catch (_) {
+    return null;
+  }
 }

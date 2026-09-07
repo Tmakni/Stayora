@@ -15,6 +15,7 @@ const logger = require('../utils/logger');
 const queue = require('../services/outboundQueue');
 const policy = require('../services/autoReplyPolicy');
 const { resolveReplyContext } = require('../services/replyContextService');
+const { noteHostMessage } = require('../services/propertyFacts');
 
 const MAX_REPLY_CHARS = 4000;
 
@@ -65,6 +66,24 @@ async function sendReply(req, res) {
         JSON.stringify({ source: 'michel_manual_reply', pending: true }),
       ]
     );
+
+    // Apprentissage continu (§18 de la spécification d'import).
+    //
+    // Ce que l'hôte vient d'écrire lui-même peut contredire un fait établi —
+    // une heure d'arrivée qui a changé, un code renouvelé. On ne remplace RIEN
+    // ici : un message isolé n'a ni les occurrences ni l'étalement qu'exigent
+    // les seuils. On lève seulement le drapeau « a peut-être changé », et
+    // l'écran de vérification posera la question.
+    //
+    // Seules les réponses MANUELLES alimentent ce signal. Une réponse générée
+    // par Michel reprend ce que Michel croit déjà savoir : s'en servir comme
+    // preuve serait un raisonnement circulaire.
+    if (ctx.propertyId) {
+      noteHostMessage(db, req.userId, ctx.propertyId, message).catch((err) => {
+        // Un signal manqué ne doit jamais empêcher l'envoi d'une réponse.
+        logger.warn(`Signal de changement non enregistré : ${err.message}`);
+      });
+    }
 
     // Idempotency key includes the manual message id, so two clicks create two
     // DIFFERENT keys only if two different messages were actually written —

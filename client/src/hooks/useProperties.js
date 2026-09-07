@@ -84,6 +84,60 @@ export function useImportAirbnbArchive() {
   });
 }
 
+// ── Centre de vérification ──────────────────────────────────────────────────
+//
+// Confirmer un fait écrit dans la fiche : il faut donc invalider AUSSI le
+// logement lui-même, sans quoi le formulaire continuerait d'afficher le champ
+// vide alors qu'il vient d'être rempli.
+
+export function usePropertyFacts(id, options = {}) {
+  return useQuery({
+    queryKey: ['properties', id, 'facts'],
+    queryFn: () => api.properties.getFacts(id),
+    enabled: !!id,
+    ...options,
+  });
+}
+
+export function usePendingFacts(options = {}) {
+  return useQuery({
+    queryKey: ['property-facts', 'pending'],
+    queryFn: () => api.properties.getPendingFacts(),
+    ...options,
+  });
+}
+
+function invalidateFacts(qc, id) {
+  qc.invalidateQueries({ queryKey: ['properties', id, 'facts'] });
+  qc.invalidateQueries({ queryKey: ['properties', id] });
+  qc.invalidateQueries({ queryKey: ['property-facts', 'pending'] });
+  qc.invalidateQueries({ queryKey: ['properties'], exact: true });
+}
+
+export function useConfirmFact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, factId, value }) => api.properties.confirmFact(id, factId, value),
+    onSuccess: (_data, vars) => invalidateFacts(qc, vars.id),
+  });
+}
+
+export function useRejectFact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, factId }) => api.properties.rejectFact(id, factId),
+    onSuccess: (_data, vars) => invalidateFacts(qc, vars.id),
+  });
+}
+
+export function useConfirmAllFacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => api.properties.confirmAllFacts(id),
+    onSuccess: (_data, id) => invalidateFacts(qc, id),
+  });
+}
+
 export function useScanAirbnbProfile() {
   return useMutation({ mutationFn: (profileUrl) => api.properties.scanAirbnbProfile(profileUrl) });
 }

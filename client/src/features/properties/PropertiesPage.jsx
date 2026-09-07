@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/button';
 import { PropertyCard } from './PropertyCard';
 import { PropertyFormDialog } from './PropertyFormDialog';
 import { AirbnbImportDialog } from './AirbnbImportDialog';
+import { FactVerificationBanner } from './FactVerificationPanel';
 import { useProperties, useDeleteProperty } from '../../hooks/useProperties';
 import { useConversations } from '../../hooks/useConversations';
 
@@ -80,6 +81,11 @@ export function PropertiesPage() {
       />
 
       <div className="mt-5">
+        {/* Ce que l'import a trouvé dans les conversations et qui attend un
+            accord. Le bandeau disparaît de lui-même quand il n'y a plus rien
+            à vérifier. */}
+        <FactVerificationBanner />
+
         {propertiesQuery.isLoading && <CardGridSkeleton />}
 
         {propertiesQuery.isError && <ErrorState onRetry={propertiesQuery.refetch} />}

@@ -5,7 +5,9 @@ const {
   parseAirbnbJson,
   isListingFile,
   exportKind,
+  isMessageKind,
 } = require('./airbnbExport');
+const { analyzeExportFacts } = require('./airbnbFactAnalysis');
 
 /**
  * Lecture des logements dans l'archive de données personnelles Airbnb.
@@ -38,16 +40,31 @@ const {
  *
  * VIE PRIVÉE — LISTE BLANCHE
  * --------------------------
- * L'archive contient bien plus que des logements : conversations avec les
- * voyageurs, virements, pièces d'identité, historique de navigation. Seuls les
- * fichiers retenus par `isListingFile` sont DÉCOMPRESSÉS ; les autres ne sont
- * jamais ouverts. Rien n'est écrit sur le disque, et aucun contenu de l'archive
- * n'est journalisé — uniquement des décomptes et des noms de fichiers.
+ * L'archive contient bien plus que des logements : virements, pièces
+ * d'identité, historique de navigation. Seuls les fichiers retenus par
+ * `isListingFile` sont DÉCOMPRESSÉS ; les autres ne sont jamais ouverts. Rien
+ * n'est écrit sur le disque, et aucun contenu de l'archive n'est journalisé —
+ * uniquement des décomptes et des noms de fichiers.
+ *
+ * `messages.json` fait exception depuis l'ajout de la deuxième couche : il est
+ * ouvert, pour les conversations et pour rien d'autre. Il est écarté AVANT la
+ * détection de logements (`readDocuments`) et n'alimente que
+ * `airbnbFactAnalysis.js`. En pratique le navigateur ne l'envoie même pas : il
+ * le réduit d'abord à un condensé des seuls messages de l'hôte
+ * (`client/src/lib/airbnbMessageDigest.js`), et le fichier d'origine reste sur
+ * la machine de l'hôte.
  */
 
 // Bornes de balayage : une archive légitime tient très largement dedans.
 const MAX_JSON_FILES = 400;
 const MAX_JSON_BYTES = 32 * 1024 * 1024;
+// Les conversations ont leur propre budget, et il est plus large : sur l'export
+// de référence `messages.json` pèse 70 Mo à lui seul. Un budget commun l'aurait
+// fait manger celui des fichiers de logement, qui sont les plus importants.
+//
+// Ce chemin ne sert qu'au DÉPÔT DIRECT du fichier brut. Le navigateur envoie
+// normalement un condensé de quelques mégaoctets (voir `airbnbMessages.js`).
+const MAX_MESSAGE_BYTES = 96 * 1024 * 1024;
 const MAX_LISTINGS = 500;
 // Profondeur de recherche dans un JSON : au-delà, on n'est plus dans une
 // structure de données mais dans du bruit.
@@ -229,7 +246,10 @@ function extractListingsFromArchive(buffer) {
   // fichiers ne sont pas seulement écartés du résultat : ils ne sont jamais
   // décompressés.
   const relevant = jsonEntries.filter((e) => isListingFile(e.name)).slice(0, MAX_JSON_FILES);
-  if (relevant.length === 0) {
+  // Les conversations ne comptent pas : elles enrichissent des logements, elles
+  // n'en produisent aucun. Une archive qui n'aurait que `messages.json` reste
+  // donc refusée, comme avant.
+  if (relevant.every((e) => isMessageKind(exportKind(e.name)))) {
     throw new ZipError(
       "Cette archive ne contient aucun fichier de logement (listings.json et compagnie). "
       + "Vérifiez qu'il s'agit bien de l'export de vos données Airbnb.",
@@ -248,17 +268,27 @@ function extractListingsFromArchive(buffer) {
   const documents = [];
   const scannedFiles = [];
   let bytesRead = 0;
+  let messageBytesRead = 0;
 
   for (const entry of ordered) {
-    if (bytesRead >= MAX_JSON_BYTES) {
+    const isMessages = isMessageKind(exportKind(entry.name));
+
+    if (!isMessages && bytesRead >= MAX_JSON_BYTES) {
       warnings.push("Archive volumineuse : la lecture a été bornée, certains fichiers JSON n'ont pas été examinés.");
       break;
+    }
+    if (isMessages && messageBytesRead >= MAX_MESSAGE_BYTES) {
+      // Les conversations sont un ENRICHISSEMENT : les écarter ne compromet
+      // aucun logement, alors qu'interrompre l'import les perdrait tous.
+      warnings.push('Fichier de conversations trop volumineux : il a été ignoré, les logements sont importés sans lui.');
+      continue;
     }
 
     let text;
     try {
       const content = readEntry(buffer, entry);
-      bytesRead += content.length;
+      if (isMessages) messageBytesRead += content.length;
+      else bytesRead += content.length;
       text = content.toString('utf8');
     } catch (err) {
       // Un fichier illisible ne doit pas faire échouer tout l'import : les
@@ -290,8 +320,19 @@ function extractListingsFromArchive(buffer) {
  * @param {Array<{name: string, data: any}>} documents
  * @param {string[]} warnings enrichi au passage
  */
-function readDocuments(documents, warnings) {
-  const structured = parseExportDocuments(documents);
+function readDocuments(documents, warnings, options = {}) {
+  // Les conversations sont mises de côté AVANT toute détection de logement.
+  //
+  // Ce n'est pas un détail de rangement : sans cette séparation, un
+  // `messages.json` finirait dans l'heuristique de forme, qui reconnaît un
+  // logement à la présence d'un nom et de quelques indices. Un message de
+  // voyageur portant un prénom et le mot « chambre » deviendrait un logement
+  // nommé « Florine ». Les conversations n'ont qu'un seul usage, et il est
+  // ailleurs.
+  const listingDocuments = (Array.isArray(documents) ? documents : [])
+    .filter((d) => d && !isMessageKind(exportKind(d.name)));
+
+  const structured = parseExportDocuments(listingDocuments, options);
   warnings.push(...structured.warnings);
 
   if (structured.listings.length > 0) {
@@ -299,16 +340,43 @@ function readDocuments(documents, warnings) {
     if (structured.listings.length > MAX_LISTINGS) {
       warnings.push(`Limite de ${MAX_LISTINGS} logements atteinte : les suivants ont été ignorés.`);
     }
+
+    // Deuxième couche : ce que les conversations de l'hôte apprennent en plus.
+    // Elle ne modifie AUCUN champ de la fiche — elle attache des faits, avec
+    // leur statut et leurs preuves, que l'utilisateur confirmera ou non.
+    // Un échec ici ne doit pas emporter l'import des logements, qui est le
+    // service principal.
+    let analysis = { byListing: new Map(), available: false, stats: null };
+    try {
+      analysis = analyzeExportFacts(documents, listings, options);
+    } catch (err) {
+      warnings.push("Les conversations n'ont pas pu être analysées ; les logements sont importés sans elles.");
+      logger.warn(`Analyse des conversations impossible : ${err.message}`);
+    }
+
+    for (const listing of listings) {
+      const found = analysis.byListing.get(String(listing.airbnb_listing_id));
+      listing.facts = found ? found.facts : [];
+      listing.fact_stats = found ? { ...found.stats, tier: found.tier } : null;
+      listing.found = { ...listing.found, facts: !!(found && found.facts.length > 0) };
+    }
+
     // Décompte uniquement : le CONTENU de l'export n'est jamais journalisé.
     logger.info(
       `Import Airbnb (lecture structurée) : ${listings.length} logement(s), `
       + `sources ${Object.entries(structured.sources).filter(([, v]) => v).map(([k]) => k).join(', ') || 'aucune'}`
     );
-    return { listings, warnings, sources: structured.sources, conflicts: structured.conflicts };
+    return {
+      listings,
+      warnings,
+      sources: { ...structured.sources, messages: analysis.available },
+      conflicts: structured.conflicts,
+      fact_analysis: analysis.stats,
+    };
   }
 
   const collected = [];
-  for (const document of documents) {
+  for (const document of listingDocuments) {
     collectListings(document.data, document.name, collected);
     if (collected.length >= MAX_LISTINGS) {
       warnings.push(`Limite de ${MAX_LISTINGS} logements atteinte : les suivants ont été ignorés.`);
@@ -324,8 +392,10 @@ function readDocuments(documents, warnings) {
     found: {
       general: true, address: false, capacity: false, amenities: false,
       rules: false, access: false, pricing: false, calendar: false,
-      reviews: false, reservations: false, permits: false,
+      reviews: false, reservations: false, permits: false, facts: false,
     },
+    facts: [],
+    fact_stats: null,
   }));
 
   logger.info(`Import Airbnb (lecture par forme) : ${listings.length} logement(s) détecté(s)`);
@@ -336,8 +406,9 @@ function readDocuments(documents, warnings) {
     sources: {
       listings: listings.length > 0,
       pricing: false, calendar: false, permits: false,
-      reviews: false, reservations: false, quickreplies: false,
+      reviews: false, reservations: false, quickreplies: false, messages: false,
     },
+    fact_analysis: null,
   };
 }
 

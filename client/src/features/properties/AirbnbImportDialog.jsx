@@ -30,11 +30,15 @@ const FOUND_LABELS = [
   ['reservations', 'Séjours à venir'],
   ['reviews', 'Avis'],
   ['permits', 'Enregistrement'],
+  ['facts', 'Infos tirées de vos messages'],
 ];
 
 // Clés que la prévisualisation ajoute pour l'affichage seul : elles n'ont rien
-// à faire dans ce qu'on renvoie à l'import.
-const PREVIEW_ONLY_KEYS = ['found', 'already_imported', 'existing_property_id', 'source_file'];
+// à faire dans ce qu'on renvoie à l'import. `facts`, lui, EST renvoyé — c'est
+// la matière de l'écran de vérification.
+const PREVIEW_ONLY_KEYS = [
+  'found', 'already_imported', 'existing_property_id', 'source_file', 'fact_stats',
+];
 
 function toImportPayload(listing) {
   const payload = { ...listing };
@@ -521,6 +525,21 @@ export function AirbnbImportDialog({ open, onOpenChange, onImported }) {
                   {archive.already_imported > 0 && ` ${archive.already_imported} déjà présent(s).`}
                   {archive.needs_verification > 0 && ` ${archive.needs_verification} sans identifiant Airbnb.`}
                 </p>
+
+                {/* Ce que l'analyse des conversations a réellement traité. On
+                    annonce des décomptes vérifiables plutôt qu'une promesse :
+                    l'hôte voit combien de ses échanges ont pu être rattachés à
+                    un logement, et que rien ne sera écrit sans son accord. */}
+                {archive.fact_analysis?.facts_total > 0 && (
+                  <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    <strong className="text-foreground">
+                      {archive.fact_analysis.facts_total} information(s)
+                    </strong>{' '}
+                    repérée(s) dans {archive.fact_analysis.threads_linked} de vos conversations
+                    (sur {archive.fact_analysis.threads_in_export} au total).
+                    Rien n&apos;est enregistré comme certain : vous confirmerez après l&apos;import.
+                  </p>
+                )}
 
                 <div className="max-h-[45dvh] space-y-1 overflow-y-auto rounded-md border border-border p-2">
                   {archive.listings.map((listing, index) => (

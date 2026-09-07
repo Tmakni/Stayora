@@ -112,7 +112,7 @@ describe('liste blanche des fichiers', () => {
 
   it("n'ouvre aucun fichier personnel ou financier", () => {
     const forbidden = [
-      'activity_log.json', 'messages.json', 'payment_processing.json',
+      'activity_log.json', 'payment_processing.json',
       'payment_instruments.json', 'payments_asset_ledger.json', 'host_payouts.json',
       'payout_authentication.json', 'id_verification.json', 'host_kyc_information.json',
       'search_history.json', 'search_telemetry_signals.json', 'profile_information.json',
@@ -132,15 +132,25 @@ describe('liste blanche des fichiers', () => {
     }
   });
 
-  it("laisse messages.json fermé, malgré ce qu'il contient d'utile", () => {
-    // Rien n'y prouve qu'une phrase décrit le logement plutôt qu'une exception
-    // faite à un voyageur : la prudence l'emporte sur la couverture.
-    expect(isListingFile('messages.json')).toBe(false);
+  // messages.json a rejoint la liste blanche, mais SEUL et sous son nom exact.
+  // Ce qui a changé n'est pas l'appréciation du risque : c'est qu'il existe
+  // maintenant un rattachement déterministe d'une conversation à un logement,
+  // et une chaîne de preuves qui refuse d'écrire sur une seule phrase.
+  it('ouvre les conversations, et uniquement sous leur nom exact', () => {
+    expect(isListingFile('messages.json')).toBe(true);
+    expect(exportKind('messages.json')).toBe('messages');
+    expect(isListingFile('airbnb_message_digest.json')).toBe(true);
+    expect(exportKind('airbnb_message_digest.json')).toBe('messagedigest');
+
+    // Le motif « message » de la liste noire continue de bloquer tout le reste.
+    for (const name of ['message_attachments.json', 'messages_payments.json', 'my_messages.json']) {
+      expect(isListingFile(name)).toBe(false);
+    }
   });
 
   it('un fichier sensible reste fermé même rangé dans un dossier « listings »', () => {
     expect(isListingFile('listings/payment_processing.json')).toBe(false);
-    expect(isListingFile('export/listings/messages.json')).toBe(false);
+    expect(isListingFile('export/listings/id_verification.json')).toBe(false);
   });
 
   it("accepte un nom d'un autre millésime, confié alors à l'heuristique", () => {

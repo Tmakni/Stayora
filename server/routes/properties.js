@@ -6,6 +6,7 @@ const {
   updateFromAirbnb, getPropertyPhotos, deletePropertyPhoto, setMainPhoto,
 } = require('../controllers/airbnbImportController');
 const { previewArchive, bulkImport } = require('../controllers/archiveImportController');
+const propertyFactsController = require('../controllers/propertyFactsController');
 const authMiddleware = require('../middleware/auth');
 const { importRateLimiter, archiveImportRateLimiter } = require('../middleware/rateLimit');
 
@@ -53,6 +54,16 @@ router.post(
   express.json({ limit: '8mb' }),
   bulkImport
 );
+
+// ── Centre de vérification des informations trouvées dans les conversations ──
+//
+// Déclaré AVANT `/:id` : sans cela, « facts » serait interprété comme un
+// identifiant de logement par la route générique.
+router.get('/facts/pending', propertyFactsController.getPendingFacts);
+router.get('/:id/facts', propertyFactsController.getPropertyFacts);
+router.post('/:id/facts/confirm-all', propertyFactsController.confirmAll);
+router.post('/:id/facts/:factId/confirm', propertyFactsController.confirm);
+router.post('/:id/facts/:factId/reject', propertyFactsController.reject);
 
 // Import/scan Airbnb — rate limited (heavy external requests)
 router.post('/import-airbnb', importRateLimiter, importAirbnbListing);

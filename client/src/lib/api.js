@@ -154,6 +154,20 @@ export const api = {
     scanAirbnbProfile: (profileUrl) =>
       request('/api/properties/scan-airbnb-profile', { method: 'POST', body: { profileUrl } }),
     updateFromAirbnb: (id) => request(`/api/properties/${id}/update-from-airbnb`, { method: 'PUT' }),
+    // Centre de vérification : ce que Michel a trouvé dans les conversations de
+    // l'hôte et qui attend son accord. Rien de ce qui est listé là n'a été
+    // écrit dans la fiche.
+    getFacts: (id) => request(`/api/properties/${id}/facts`),
+    getPendingFacts: () => request('/api/properties/facts/pending'),
+    confirmFact: (id, factId, value) =>
+      request(`/api/properties/${id}/facts/${factId}/confirm`, {
+        method: 'POST',
+        body: value === undefined || value === null ? {} : { value },
+      }),
+    rejectFact: (id, factId) =>
+      request(`/api/properties/${id}/facts/${factId}/reject`, { method: 'POST' }),
+    confirmAllFacts: (id) =>
+      request(`/api/properties/${id}/facts/confirm-all`, { method: 'POST' }),
     getPhotos: (id) => request(`/api/properties/${id}/photos`),
     deletePhoto: (id, photoId) => request(`/api/properties/${id}/photos/${photoId}`, { method: 'DELETE' }),
     setMainPhoto: (id, photoId) => request(`/api/properties/${id}/photos/${photoId}/main`, { method: 'PUT' }),
